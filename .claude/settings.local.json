@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir:*)",
+      "Bash(grep:*)",
+      "Bash(npm run lint:*)",
+      "Bash(node -c:*)",
+      "Bash(tasklist:*)",
+      "Bash(findstr:*)",
+      "Bash(npm run dev:*)",
+      "Bash(curl:*)",
+      "Bash(node generate-password.js:*)",
+      "Bash(mysql:*)",
+      "Bash(cat:*)",
+      "Bash(del \"c:\\\\Users\\\\ACER\\\\Documents\\\\final\\\\config\\\\add_indexes.sql\")"
+    ]
+  }
+}
