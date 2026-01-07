@@ -6,15 +6,18 @@ import App from './App.jsx';
 import { AuthProvider } from './context/AuthContext';
 import { ToastProvider } from './context/ToastContext';
 import { LanguageProvider } from './context/LanguageContext';
+import ErrorBoundary from './components/ErrorBoundary';
 
 createRoot(document.getElementById('root')).render(
-  <BrowserRouter>
-    <AuthProvider>
-      <ToastProvider>
-        <LanguageProvider>
-          <App />
-        </LanguageProvider>
-      </ToastProvider>
-    </AuthProvider>
-  </BrowserRouter>
+  <ErrorBoundary>
+    <BrowserRouter>
+      <AuthProvider>
+        <ToastProvider>
+          <LanguageProvider>
+            <App />
+          </LanguageProvider>
+        </ToastProvider>
+      </AuthProvider>
+    </BrowserRouter>
+  </ErrorBoundary>
 );

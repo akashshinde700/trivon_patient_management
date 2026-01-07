@@ -12,7 +12,14 @@
       "Bash(node generate-password.js:*)",
       "Bash(mysql:*)",
       "Bash(cat:*)",
-      "Bash(del \"c:\\\\Users\\\\ACER\\\\Documents\\\\final\\\\config\\\\add_indexes.sql\")"
+      "Bash(del \"c:\\\\Users\\\\ACER\\\\Documents\\\\final\\\\config\\\\add_indexes.sql\")",
+      "Bash(where:*)",
+      "Bash(powershell -Command \"\\(Get-Content ''c:\\\\Users\\\\ACER\\\\Documents\\\\final\\\\config\\\\patient_management.sql'' | Measure-Object -Line\\).Lines\")",
+      "Bash(powershell -ExecutionPolicy Bypass -File:*)",
+      "Bash(del:*)",
+      "Bash(powershell -Command \"\\(Get-Content ''c:\\\\Users\\\\ACER\\\\Documents\\\\final\\\\PROJECT_ANALYSIS_REPORT.md'' | Measure-Object -Line\\).Lines\")",
+      "Bash(xargs ls:*)",
+      "Bash(powershell -Command:*)"
     ]
   }
 }

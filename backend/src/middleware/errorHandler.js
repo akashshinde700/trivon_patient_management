@@ -1,4 +1,7 @@
-// Comprehensive error handler
+/**
+ * Comprehensive error handler middleware
+ * Provides standardized error responses across the application
+ */
 function errorHandler(err, req, res, next) { // eslint-disable-line no-unused-vars
   // Log error with context
   console.error('Error:', {
@@ -7,84 +10,128 @@ function errorHandler(err, req, res, next) { // eslint-disable-line no-unused-va
     method: req.method,
     url: req.url,
     ip: req.ip,
-    user: req.user?.id || 'anonymous'
+    user: req.user?.id || 'anonymous',
+    timestamp: new Date().toISOString()
   });
+
+  // Determine status code
+  const statusCode = err.statusCode || err.status || 500;
+
+  // Standard error response format
+  const errorResponse = {
+    success: false,
+    error: {
+      message: err.message || 'An unexpected error occurred',
+      code: err.code || 'INTERNAL_ERROR'
+    }
+  };
 
   // Database errors
   if (err.code === 'ER_DUP_ENTRY') {
-    return res.status(409).json({
-      error: 'Duplicate entry',
-      message: 'A record with this information already exists'
-    });
+    errorResponse.error.code = 'DUPLICATE_ENTRY';
+    errorResponse.error.message = 'A record with this information already exists';
+    return res.status(409).json(errorResponse);
   }
 
   if (err.code === 'ER_NO_REFERENCED_ROW_2') {
-    return res.status(400).json({
-      error: 'Invalid reference',
-      message: 'Referenced record does not exist'
-    });
+    errorResponse.error.code = 'INVALID_REFERENCE';
+    errorResponse.error.message = 'Referenced record does not exist';
+    return res.status(400).json(errorResponse);
   }
 
   if (err.code === 'ER_BAD_FIELD_ERROR') {
-    return res.status(500).json({
-      error: 'Database error',
-      message: 'Invalid field in query'
-    });
+    errorResponse.error.code = 'DATABASE_ERROR';
+    errorResponse.error.message = 'Invalid database field';
+    return res.status(500).json(errorResponse);
+  }
+
+  if (err.code === 'ER_NO_SUCH_TABLE') {
+    errorResponse.error.code = 'DATABASE_ERROR';
+    errorResponse.error.message = 'Database table not found';
+    return res.status(500).json(errorResponse);
+  }
+
+  if (err.code === 'ECONNREFUSED') {
+    errorResponse.error.code = 'DATABASE_CONNECTION_ERROR';
+    errorResponse.error.message = 'Database connection failed';
+    return res.status(503).json(errorResponse);
   }
 
   // JWT errors
   if (err.name === 'JsonWebTokenError') {
-    return res.status(401).json({
-      error: 'Invalid token',
-      message: 'Authentication token is invalid'
-    });
+    errorResponse.error.code = 'INVALID_TOKEN';
+    errorResponse.error.message = 'Authentication token is invalid';
+    return res.status(401).json(errorResponse);
   }
 
   if (err.name === 'TokenExpiredError') {
-    return res.status(401).json({
-      error: 'Token expired',
-      message: 'Authentication token has expired'
-    });
+    errorResponse.error.code = 'TOKEN_EXPIRED';
+    errorResponse.error.message = 'Authentication token has expired. Please login again';
+    return res.status(401).json(errorResponse);
   }
 
   // Validation errors
-  if (err.name === 'ValidationError' || err.status === 400) {
-    return res.status(400).json({
-      error: err.message || 'Validation error',
-      details: err.details || undefined
-    });
+  if (err.name === 'ValidationError') {
+    errorResponse.error.code = 'VALIDATION_ERROR';
+    if (err.details) {
+      errorResponse.error.details = err.details;
+    }
+    return res.status(400).json(errorResponse);
   }
 
   // Unauthorized errors
-  if (err.status === 401 || err.status === 403) {
-    return res.status(err.status).json({
-      error: err.message || 'Unauthorized',
-      message: err.message || 'You do not have permission to access this resource'
-    });
+  if (statusCode === 401) {
+    errorResponse.error.code = 'UNAUTHORIZED';
+    errorResponse.error.message = err.message || 'Authentication required';
+    return res.status(401).json(errorResponse);
+  }
+
+  if (statusCode === 403) {
+    errorResponse.error.code = 'FORBIDDEN';
+    errorResponse.error.message = err.message || 'You do not have permission to access this resource';
+    return res.status(403).json(errorResponse);
   }
 
   // Not found errors
-  if (err.status === 404) {
-    return res.status(404).json({
-      error: 'Not found',
-      message: err.message || 'The requested resource was not found'
-    });
+  if (statusCode === 404) {
+    errorResponse.error.code = 'NOT_FOUND';
+    errorResponse.error.message = err.message || 'The requested resource was not found';
+    return res.status(404).json(errorResponse);
+  }
+
+  // Rate limit errors
+  if (statusCode === 429) {
+    errorResponse.error.code = 'RATE_LIMIT_EXCEEDED';
+    errorResponse.error.message = err.message || 'Too many requests. Please try again later';
+    return res.status(429).json(errorResponse);
+  }
+
+  // Include stack trace and additional details only in development
+  if (process.env.NODE_ENV === 'development') {
+    errorResponse.error.stack = err.stack;
+    if (err.details) {
+      errorResponse.error.details = err.details;
+    }
   }
 
   // Default error response
-  const status = err.status || err.statusCode || 500;
-  const response = {
-    error: err.message || 'Internal server error'
-  };
+  res.status(statusCode).json(errorResponse);
+}
 
-  // Include stack trace only in development
-  if (process.env.NODE_ENV === 'development') {
-    response.stack = err.stack;
-    response.details = err;
-  }
-
-  res.status(status).json(response);
+/**
+ * Create a custom error with status code
+ * @param {string} message - Error message
+ * @param {number} statusCode - HTTP status code
+ * @param {string} code - Error code
+ * @returns {Error} Error object
+ */
+function createError(message, statusCode = 500, code = 'ERROR') {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  error.code = code;
+  return error;
 }
 
 module.exports = errorHandler;
+module.exports.createError = createError;
 

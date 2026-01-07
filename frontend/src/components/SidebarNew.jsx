@@ -17,7 +17,8 @@ import {
   FiDownload,
   FiChevronDown,
   FiChevronRight,
-  FiMessageSquare
+  FiMessageSquare,
+  FiBriefcase
 } from 'react-icons/fi';
 
 const menuSections = [
@@ -37,6 +38,15 @@ const menuSections = [
       { label: 'Clinical Dashboard', icon: <FiClipboard />, to: '/clinical' },
       { label: 'Prescriptions', icon: <FiClipboard />, to: '/orders' },
       { label: 'Lab Tests', icon: <FiActivity />, to: '/lab-investigations' }
+    ]
+  },
+  {
+    title: 'IPD Management',
+    icon: <FiBriefcase />,
+    items: [
+      { label: 'Admissions', icon: <FiBriefcase />, to: '/admissions' },
+      { label: 'IPD Dashboard', icon: <FiActivity />, to: '/ipd-dashboard' },
+      { label: 'Room Management', icon: <FiLayout />, to: '/room-management' }
     ]
   },
   {

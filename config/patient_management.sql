@@ -1,4 +1,4 @@
--- =====================================================
+﻿-- =====================================================
 -- Full Patient Management DB Schema (Updated)
 -- Fully compatible with MariaDB 10.4.32
 -- Charset: utf8mb4 / Collation: utf8mb4_unicode_ci
@@ -1924,4 +1924,1134 @@ CREATE INDEX idx_notif_user_unread ON notifications(user_id, is_read);
 ANALYZE TABLE users, clinics, doctors, patients, appointments, prescriptions, diagnosis_templates, medications_templates;
 
 SET FOREIGN_KEY_CHECKS = 1;
+
+-- =====================================================
+-- IPD-OPD MANAGEMENT EXTENSION
+-- Date: January 6, 2026
+-- =====================================================
+-- =====================================================
+-- IPD-OPD Management Extension
+-- Patient Management System - LAS Trivon
+-- Date: January 6, 2026
+-- Compatible with MariaDB 10.4.32
+-- =====================================================
+
+
+
+-- =====================================================
+-- TABLE: admission_types
+-- Master table for admission types
+-- =====================================================
+CREATE TABLE IF NOT EXISTS `admission_types` (
+  `id` INT(11) NOT NULL AUTO_INCREMENT,
+  `type_code` VARCHAR(20) NOT NULL COMMENT 'IPD or OPD',
+  `type_name` VARCHAR(100) NOT NULL,
+  `description` TEXT DEFAULT NULL,
+  `is_active` TINYINT(1) DEFAULT 1,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_admission_types_code` (`type_code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =====================================================
+-- TABLE: room_types
+-- Master table for room categories
+-- =====================================================
+CREATE TABLE IF NOT EXISTS `room_types` (
+  `id` INT(11) NOT NULL AUTO_INCREMENT,
+  `type_name` VARCHAR(100) NOT NULL COMMENT 'General, Semi-Private, Private, ICU, etc',
+  `description` TEXT DEFAULT NULL,
+  `base_charge_per_day` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+  `clinic_id` INT(11) DEFAULT NULL,
+  `is_active` TINYINT(1) DEFAULT 1,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_room_types_clinic` (`clinic_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =====================================================
+-- TABLE: rooms
+-- Individual room/bed inventory
+-- =====================================================
+CREATE TABLE IF NOT EXISTS `rooms` (
+  `id` INT(11) NOT NULL AUTO_INCREMENT,
+  `room_number` VARCHAR(50) NOT NULL,
+  `room_type_id` INT(11) NOT NULL,
+  `floor` VARCHAR(20) DEFAULT NULL,
+  `building` VARCHAR(100) DEFAULT NULL,
+  `bed_count` INT(11) DEFAULT 1,
+  `clinic_id` INT(11) DEFAULT NULL,
+  `status` ENUM('available','occupied','maintenance','reserved') DEFAULT 'available',
+  `is_active` TINYINT(1) DEFAULT 1,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_rooms_number_clinic` (`room_number`, `clinic_id`),
+  KEY `idx_rooms_type` (`room_type_id`),
+  KEY `idx_rooms_status` (`status`),
+  KEY `idx_rooms_clinic` (`clinic_id`),
+  FOREIGN KEY (`room_type_id`) REFERENCES `room_types`(`id`) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =====================================================
+-- TABLE: patient_admissions
+-- Core IPD-OPD admission tracking
+-- =====================================================
+CREATE TABLE IF NOT EXISTS `patient_admissions` (
+  `id` INT(11) NOT NULL AUTO_INCREMENT,
+  `admission_number` VARCHAR(50) NOT NULL COMMENT 'Unique admission ID',
+  `patient_id` INT(11) NOT NULL,
+  `admission_type` ENUM('IPD','OPD') NOT NULL DEFAULT 'OPD',
+  `doctor_id` INT(11) NOT NULL,
+  `clinic_id` INT(11) DEFAULT NULL,
+  `appointment_id` INT(11) DEFAULT NULL COMMENT 'Link to original appointment if any',
+
+  -- Admission Details
+  `admission_date` DATETIME NOT NULL,
+  `admission_time` TIME NOT NULL,
+  `discharge_date` DATETIME DEFAULT NULL,
+  `discharge_time` TIME DEFAULT NULL,
+  `total_days` INT(11) DEFAULT 0 COMMENT 'Auto-calculated stay duration',
+
+  -- Room Assignment (for IPD)
+  `room_id` INT(11) DEFAULT NULL,
+  `bed_number` VARCHAR(20) DEFAULT NULL,
+
+  -- Clinical Information
+  `chief_complaint` TEXT DEFAULT NULL,
+  `provisional_diagnosis` TEXT DEFAULT NULL,
+  `final_diagnosis` TEXT DEFAULT NULL,
+  `treatment_summary` TEXT DEFAULT NULL,
+  `discharge_instructions` TEXT DEFAULT NULL,
+
+  -- Status Management
+  `status` ENUM('admitted','discharged','transferred','cancelled') DEFAULT 'admitted',
+  `is_emergency` TINYINT(1) DEFAULT 0,
+
+  -- Billing Control
+  `bill_locked` TINYINT(1) DEFAULT 0 COMMENT 'Lock after discharge to prevent edits',
+  `bill_locked_at` TIMESTAMP NULL DEFAULT NULL,
+  `bill_locked_by` INT(11) DEFAULT NULL COMMENT 'User who locked the bill',
+
+  -- Audit
+  `admitted_by` INT(11) DEFAULT NULL COMMENT 'Staff who created admission',
+  `discharged_by` INT(11) DEFAULT NULL COMMENT 'Staff who processed discharge',
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_admission_number` (`admission_number`),
+  KEY `idx_admissions_patient` (`patient_id`),
+  KEY `idx_admissions_doctor` (`doctor_id`),
+  KEY `idx_admissions_type` (`admission_type`),
+  KEY `idx_admissions_status` (`status`),
+  KEY `idx_admissions_date` (`admission_date`),
+  KEY `idx_admissions_room` (`room_id`),
+  KEY `idx_admissions_clinic` (`clinic_id`),
+  KEY `idx_admissions_bill_locked` (`bill_locked`),
+  FOREIGN KEY (`patient_id`) REFERENCES `patients`(`id`) ON DELETE RESTRICT,
+  FOREIGN KEY (`doctor_id`) REFERENCES `doctors`(`id`) ON DELETE RESTRICT,
+  FOREIGN KEY (`room_id`) REFERENCES `rooms`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =====================================================
+-- TABLE: ipd_daily_services
+-- Date-wise tracking of services provided
+-- =====================================================
+CREATE TABLE IF NOT EXISTS `ipd_daily_services` (
+  `id` INT(11) NOT NULL AUTO_INCREMENT,
+  `admission_id` INT(11) NOT NULL,
+  `service_date` DATE NOT NULL,
+  `service_id` INT(11) DEFAULT NULL COMMENT 'Link to services master',
+  `service_name` VARCHAR(255) NOT NULL,
+  `service_category` VARCHAR(100) DEFAULT NULL COMMENT 'Consultation, Procedure, Investigation, etc',
+  `quantity` INT(11) DEFAULT 1,
+  `unit_price` DECIMAL(10,2) NOT NULL,
+  `discount` DECIMAL(10,2) DEFAULT 0.00,
+  `total_price` DECIMAL(10,2) NOT NULL,
+  `doctor_id` INT(11) DEFAULT NULL COMMENT 'Doctor who ordered/performed service',
+  `performed_by` INT(11) DEFAULT NULL COMMENT 'Staff who performed service',
+  `notes` TEXT DEFAULT NULL,
+  `status` ENUM('ordered','completed','cancelled') DEFAULT 'completed',
+  `is_deleted` TINYINT(1) DEFAULT 0 COMMENT 'Soft delete for rollback',
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
+  `deleted_by` INT(11) DEFAULT NULL,
+  `created_by` INT(11) DEFAULT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_daily_services_admission` (`admission_id`),
+  KEY `idx_daily_services_date` (`service_date`),
+  KEY `idx_daily_services_service` (`service_id`),
+  KEY `idx_daily_services_doctor` (`doctor_id`),
+  KEY `idx_daily_services_status` (`status`),
+  KEY `idx_daily_services_deleted` (`is_deleted`),
+  FOREIGN KEY (`admission_id`) REFERENCES `patient_admissions`(`id`) ON DELETE CASCADE,
+  FOREIGN KEY (`service_id`) REFERENCES `services`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =====================================================
+-- TABLE: ipd_medicines_consumables
+-- Daily medicines and consumables tracking
+-- =====================================================
+CREATE TABLE IF NOT EXISTS `ipd_medicines_consumables` (
+  `id` INT(11) NOT NULL AUTO_INCREMENT,
+  `admission_id` INT(11) NOT NULL,
+  `entry_date` DATE NOT NULL,
+  `entry_time` TIME NOT NULL,
+  `item_type` ENUM('medicine','consumable') NOT NULL,
+  `medicine_id` INT(11) DEFAULT NULL COMMENT 'Link to medicines master',
+  `item_name` VARCHAR(255) NOT NULL,
+  `dosage` VARCHAR(100) DEFAULT NULL COMMENT 'For medicines',
+  `quantity` DECIMAL(10,2) NOT NULL,
+  `unit` VARCHAR(50) DEFAULT NULL COMMENT 'tablet, ml, piece, etc',
+  `unit_price` DECIMAL(10,2) NOT NULL,
+  `total_price` DECIMAL(10,2) NOT NULL,
+  `batch_number` VARCHAR(100) DEFAULT NULL,
+  `expiry_date` DATE DEFAULT NULL,
+  `administered_by` INT(11) DEFAULT NULL COMMENT 'Staff who gave medicine/used item',
+  `notes` TEXT DEFAULT NULL,
+  `status` ENUM('ordered','administered','cancelled') DEFAULT 'administered',
+  `is_deleted` TINYINT(1) DEFAULT 0,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
+  `deleted_by` INT(11) DEFAULT NULL,
+  `created_by` INT(11) DEFAULT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_medicines_admission` (`admission_id`),
+  KEY `idx_medicines_date` (`entry_date`),
+  KEY `idx_medicines_type` (`item_type`),
+  KEY `idx_medicines_medicine` (`medicine_id`),
+  KEY `idx_medicines_deleted` (`is_deleted`),
+  FOREIGN KEY (`admission_id`) REFERENCES `patient_admissions`(`id`) ON DELETE CASCADE,
+  FOREIGN KEY (`medicine_id`) REFERENCES `medicines`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =====================================================
+-- TABLE: ipd_room_charges
+-- Auto-generated daily room charges
+-- =====================================================
+CREATE TABLE IF NOT EXISTS `ipd_room_charges` (
+  `id` INT(11) NOT NULL AUTO_INCREMENT,
+  `admission_id` INT(11) NOT NULL,
+  `charge_date` DATE NOT NULL,
+  `room_id` INT(11) NOT NULL,
+  `room_type_id` INT(11) NOT NULL,
+  `charge_amount` DECIMAL(10,2) NOT NULL,
+  `is_charged` TINYINT(1) DEFAULT 1,
+  `notes` TEXT DEFAULT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_room_charges_admission_date` (`admission_id`, `charge_date`),
+  KEY `idx_room_charges_admission` (`admission_id`),
+  KEY `idx_room_charges_date` (`charge_date`),
+  KEY `idx_room_charges_room` (`room_id`),
+  FOREIGN KEY (`admission_id`) REFERENCES `patient_admissions`(`id`) ON DELETE CASCADE,
+  FOREIGN KEY (`room_id`) REFERENCES `rooms`(`id`) ON DELETE RESTRICT,
+  FOREIGN KEY (`room_type_id`) REFERENCES `room_types`(`id`) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =====================================================
+-- TABLE: admission_payments
+-- Advance and partial payment tracking
+-- =====================================================
+CREATE TABLE IF NOT EXISTS `admission_payments` (
+  `id` INT(11) NOT NULL AUTO_INCREMENT,
+  `admission_id` INT(11) NOT NULL,
+  `payment_date` DATETIME NOT NULL,
+  `payment_type` ENUM('advance','partial','final','refund') NOT NULL DEFAULT 'advance',
+  `amount` DECIMAL(10,2) NOT NULL,
+  `payment_method` VARCHAR(50) DEFAULT NULL COMMENT 'Cash, Card, UPI, etc',
+  `payment_reference` VARCHAR(100) DEFAULT NULL,
+  `received_by` INT(11) DEFAULT NULL COMMENT 'Staff who received payment',
+  `notes` TEXT DEFAULT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_admission_payments_admission` (`admission_id`),
+  KEY `idx_admission_payments_type` (`payment_type`),
+  KEY `idx_admission_payments_date` (`payment_date`),
+  FOREIGN KEY (`admission_id`) REFERENCES `patient_admissions`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =====================================================
+-- TABLE: admission_bills
+-- Final consolidated bill for admission
+-- =====================================================
+CREATE TABLE IF NOT EXISTS `admission_bills` (
+  `id` INT(11) NOT NULL AUTO_INCREMENT,
+  `admission_id` INT(11) NOT NULL,
+  `bill_number` VARCHAR(50) NOT NULL,
+  `bill_date` DATETIME NOT NULL,
+
+  -- Bill Components
+  `room_charges` DECIMAL(10,2) DEFAULT 0.00,
+  `services_charges` DECIMAL(10,2) DEFAULT 0.00,
+  `medicines_charges` DECIMAL(10,2) DEFAULT 0.00,
+  `consumables_charges` DECIMAL(10,2) DEFAULT 0.00,
+
+  -- Subtotal and Adjustments
+  `subtotal` DECIMAL(10,2) DEFAULT 0.00,
+  `discount_percent` DECIMAL(5,2) DEFAULT 0.00,
+  `discount_amount` DECIMAL(10,2) DEFAULT 0.00,
+  `gst_percent` DECIMAL(5,2) DEFAULT 0.00,
+  `gst_amount` DECIMAL(10,2) DEFAULT 0.00,
+  `other_charges` DECIMAL(10,2) DEFAULT 0.00,
+
+  -- Final Amounts
+  `gross_total` DECIMAL(10,2) NOT NULL,
+  `advance_paid` DECIMAL(10,2) DEFAULT 0.00,
+  `net_payable` DECIMAL(10,2) NOT NULL,
+  `amount_paid` DECIMAL(10,2) DEFAULT 0.00,
+  `balance_due` DECIMAL(10,2) DEFAULT 0.00,
+
+  -- Bill Status
+  `payment_status` ENUM('unpaid','partial','paid','refund_pending') DEFAULT 'unpaid',
+  `is_locked` TINYINT(1) DEFAULT 0 COMMENT 'Locked after discharge',
+  `locked_at` TIMESTAMP NULL DEFAULT NULL,
+  `locked_by` INT(11) DEFAULT NULL,
+
+  -- Audit
+  `generated_by` INT(11) DEFAULT NULL,
+  `notes` TEXT DEFAULT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_admission_bills_number` (`bill_number`),
+  UNIQUE KEY `uk_admission_bills_admission` (`admission_id`),
+  KEY `idx_admission_bills_date` (`bill_date`),
+  KEY `idx_admission_bills_status` (`payment_status`),
+  KEY `idx_admission_bills_locked` (`is_locked`),
+  FOREIGN KEY (`admission_id`) REFERENCES `patient_admissions`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =====================================================
+-- TABLE: bill_audit_log
+-- Track all bill modifications for compliance
+-- =====================================================
+CREATE TABLE IF NOT EXISTS `bill_audit_log` (
+  `id` INT(11) NOT NULL AUTO_INCREMENT,
+  `admission_id` INT(11) NOT NULL,
+  `bill_id` INT(11) DEFAULT NULL,
+  `action` VARCHAR(100) NOT NULL COMMENT 'Created, Updated, Locked, Unlocked, etc',
+  `field_changed` VARCHAR(100) DEFAULT NULL,
+  `old_value` TEXT DEFAULT NULL,
+  `new_value` TEXT DEFAULT NULL,
+  `changed_by` INT(11) NOT NULL,
+  `change_reason` TEXT DEFAULT NULL,
+  `ip_address` VARCHAR(45) DEFAULT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_bill_audit_admission` (`admission_id`),
+  KEY `idx_bill_audit_bill` (`bill_id`),
+  KEY `idx_bill_audit_action` (`action`),
+  KEY `idx_bill_audit_user` (`changed_by`),
+  KEY `idx_bill_audit_created` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =====================================================
+-- INSERT MASTER DATA
+-- =====================================================
+
+-- Admission Types
+INSERT INTO `admission_types` (`type_code`, `type_name`, `description`) VALUES
+('IPD', 'In-Patient Department', 'Admitted patients requiring hospitalization'),
+('OPD', 'Out-Patient Department', 'Walk-in patients for consultation only')
+ON DUPLICATE KEY UPDATE `type_name` = VALUES(`type_name`);
+
+-- Sample Room Types (customize as needed)
+INSERT INTO `room_types` (`type_name`, `description`, `base_charge_per_day`) VALUES
+('General Ward', 'Multi-bed general ward', 500.00),
+('Semi-Private', 'Two-bed shared room', 1000.00),
+('Private', 'Single bed private room', 2000.00),
+('Deluxe', 'Deluxe private room with amenities', 3500.00),
+('ICU', 'Intensive Care Unit', 5000.00),
+('NICU', 'Neonatal Intensive Care Unit', 6000.00)
+ON DUPLICATE KEY UPDATE `base_charge_per_day` = VALUES(`base_charge_per_day`);
+
+-- =====================================================
+-- STORED PROCEDURES
+-- =====================================================
+
+-- Procedure to calculate total stay days (including same-day discharge)
+DELIMITER $$
+
+DROP PROCEDURE IF EXISTS `calculate_admission_days`$$
+CREATE PROCEDURE `calculate_admission_days`(
+  IN p_admission_id INT
+)
+BEGIN
+  DECLARE v_admission_date DATETIME;
+  DECLARE v_discharge_date DATETIME;
+  DECLARE v_days INT;
+
+  SELECT admission_date, discharge_date
+  INTO v_admission_date, v_discharge_date
+  FROM patient_admissions
+  WHERE id = p_admission_id;
+
+  IF v_discharge_date IS NULL THEN
+    -- If not discharged, calculate from admission till now
+    SET v_days = DATEDIFF(CURRENT_DATE, DATE(v_admission_date)) + 1;
+  ELSE
+    -- Calculate days including same-day discharge (minimum 1 day)
+    SET v_days = GREATEST(1, DATEDIFF(DATE(v_discharge_date), DATE(v_admission_date)) + 1);
+  END IF;
+
+  UPDATE patient_admissions
+  SET total_days = v_days
+  WHERE id = p_admission_id;
+
+  SELECT v_days AS calculated_days;
+END$$
+
+-- Procedure to generate daily room charges
+DROP PROCEDURE IF EXISTS `generate_room_charges`$$
+CREATE PROCEDURE `generate_room_charges`(
+  IN p_admission_id INT
+)
+BEGIN
+  DECLARE v_admission_date DATE;
+  DECLARE v_discharge_date DATE;
+  DECLARE v_current_date DATE;
+  DECLARE v_room_id INT;
+  DECLARE v_room_type_id INT;
+  DECLARE v_charge_amount DECIMAL(10,2);
+  DECLARE v_end_date DATE;
+
+  -- Get admission details
+  SELECT
+    DATE(admission_date),
+    DATE(COALESCE(discharge_date, CURRENT_TIMESTAMP)),
+    room_id
+  INTO v_admission_date, v_discharge_date, v_room_id
+  FROM patient_admissions
+  WHERE id = p_admission_id AND admission_type = 'IPD';
+
+  IF v_room_id IS NULL THEN
+    SIGNAL SQLSTATE '45000'
+    SET MESSAGE_TEXT = 'Room not assigned for this admission';
+  END IF;
+
+  -- Get room type and charge
+  SELECT room_type_id INTO v_room_type_id FROM rooms WHERE id = v_room_id;
+  SELECT base_charge_per_day INTO v_charge_amount FROM room_types WHERE id = v_room_type_id;
+
+  SET v_current_date = v_admission_date;
+  SET v_end_date = v_discharge_date;
+
+  -- Generate charges for each day
+  WHILE v_current_date <= v_end_date DO
+    INSERT INTO ipd_room_charges
+      (admission_id, charge_date, room_id, room_type_id, charge_amount)
+    VALUES
+      (p_admission_id, v_current_date, v_room_id, v_room_type_id, v_charge_amount)
+    ON DUPLICATE KEY UPDATE charge_amount = v_charge_amount;
+
+    SET v_current_date = DATE_ADD(v_current_date, INTERVAL 1 DAY);
+  END WHILE;
+
+END$$
+
+-- Procedure to calculate and update admission bill
+DROP PROCEDURE IF EXISTS `calculate_admission_bill`$$
+CREATE PROCEDURE `calculate_admission_bill`(
+  IN p_admission_id INT
+)
+BEGIN
+  DECLARE v_room_charges DECIMAL(10,2) DEFAULT 0.00;
+  DECLARE v_services_charges DECIMAL(10,2) DEFAULT 0.00;
+  DECLARE v_medicines_charges DECIMAL(10,2) DEFAULT 0.00;
+  DECLARE v_consumables_charges DECIMAL(10,2) DEFAULT 0.00;
+  DECLARE v_subtotal DECIMAL(10,2);
+  DECLARE v_discount_amount DECIMAL(10,2);
+  DECLARE v_gst_amount DECIMAL(10,2);
+  DECLARE v_gross_total DECIMAL(10,2);
+  DECLARE v_advance_paid DECIMAL(10,2);
+  DECLARE v_net_payable DECIMAL(10,2);
+  DECLARE v_bill_exists INT;
+
+  -- Check if bill is locked
+  IF (SELECT bill_locked FROM patient_admissions WHERE id = p_admission_id) = 1 THEN
+    SIGNAL SQLSTATE '45000'
+    SET MESSAGE_TEXT = 'Bill is locked. Cannot recalculate after discharge.';
+  END IF;
+
+  -- Calculate room charges
+  SELECT COALESCE(SUM(charge_amount), 0.00)
+  INTO v_room_charges
+  FROM ipd_room_charges
+  WHERE admission_id = p_admission_id AND is_charged = 1;
+
+  -- Calculate services charges (excluding deleted)
+  SELECT COALESCE(SUM(total_price), 0.00)
+  INTO v_services_charges
+  FROM ipd_daily_services
+  WHERE admission_id = p_admission_id AND is_deleted = 0;
+
+  -- Calculate medicines and consumables charges separately
+  SELECT
+    COALESCE(SUM(CASE WHEN item_type = 'medicine' THEN total_price ELSE 0 END), 0.00),
+    COALESCE(SUM(CASE WHEN item_type = 'consumable' THEN total_price ELSE 0 END), 0.00)
+  INTO v_medicines_charges, v_consumables_charges
+  FROM ipd_medicines_consumables
+  WHERE admission_id = p_admission_id AND is_deleted = 0;
+
+  -- Calculate subtotal
+  SET v_subtotal = v_room_charges + v_services_charges + v_medicines_charges + v_consumables_charges;
+
+  -- Get or create bill
+  SELECT COUNT(*) INTO v_bill_exists FROM admission_bills WHERE admission_id = p_admission_id;
+
+  IF v_bill_exists = 0 THEN
+    -- Create new bill
+    INSERT INTO admission_bills (
+      admission_id, bill_number, bill_date,
+      room_charges, services_charges, medicines_charges, consumables_charges,
+      subtotal, discount_percent, discount_amount, gst_percent, gst_amount,
+      gross_total, advance_paid, net_payable
+    ) VALUES (
+      p_admission_id,
+      CONCAT('BILL-', LPAD(p_admission_id, 8, '0')),
+      CURRENT_TIMESTAMP,
+      v_room_charges, v_services_charges, v_medicines_charges, v_consumables_charges,
+      v_subtotal, 0.00, 0.00, 0.00, 0.00,
+      v_subtotal, 0.00, v_subtotal
+    );
+  ELSE
+    -- Update existing bill
+    UPDATE admission_bills
+    SET
+      room_charges = v_room_charges,
+      services_charges = v_services_charges,
+      medicines_charges = v_medicines_charges,
+      consumables_charges = v_consumables_charges,
+      subtotal = v_subtotal,
+      -- Recalculate with existing discount and GST percentages
+      discount_amount = v_subtotal * (discount_percent / 100),
+      gross_total = v_subtotal - (v_subtotal * (discount_percent / 100)) + ((v_subtotal - (v_subtotal * (discount_percent / 100))) * (gst_percent / 100)),
+      gst_amount = (v_subtotal - (v_subtotal * (discount_percent / 100))) * (gst_percent / 100),
+      net_payable = v_subtotal - (v_subtotal * (discount_percent / 100)) + ((v_subtotal - (v_subtotal * (discount_percent / 100))) * (gst_percent / 100)) - COALESCE(advance_paid, 0.00),
+      balance_due = v_subtotal - (v_subtotal * (discount_percent / 100)) + ((v_subtotal - (v_subtotal * (discount_percent / 100))) * (gst_percent / 100)) - COALESCE(advance_paid, 0.00) - COALESCE(amount_paid, 0.00)
+    WHERE admission_id = p_admission_id;
+  END IF;
+
+END$$
+
+-- Procedure to update advance payment
+DROP PROCEDURE IF EXISTS `update_advance_payment`$$
+CREATE PROCEDURE `update_advance_payment`(
+  IN p_admission_id INT
+)
+BEGIN
+  DECLARE v_total_advance DECIMAL(10,2);
+
+  SELECT COALESCE(SUM(amount), 0.00)
+  INTO v_total_advance
+  FROM admission_payments
+  WHERE admission_id = p_admission_id AND payment_type IN ('advance', 'partial');
+
+  UPDATE admission_bills
+  SET advance_paid = v_total_advance,
+      net_payable = gross_total - v_total_advance,
+      balance_due = gross_total - v_total_advance - COALESCE(amount_paid, 0.00)
+  WHERE admission_id = p_admission_id;
+
+END$$
+
+-- Procedure to lock bill after discharge
+DROP PROCEDURE IF EXISTS `lock_admission_bill`$$
+CREATE PROCEDURE `lock_admission_bill`(
+  IN p_admission_id INT,
+  IN p_locked_by INT
+)
+BEGIN
+  DECLARE v_status VARCHAR(20);
+
+  SELECT status INTO v_status FROM patient_admissions WHERE id = p_admission_id;
+
+  IF v_status != 'discharged' THEN
+    SIGNAL SQLSTATE '45000'
+    SET MESSAGE_TEXT = 'Can only lock bills for discharged patients';
+  END IF;
+
+  -- Lock admission
+  UPDATE patient_admissions
+  SET
+    bill_locked = 1,
+    bill_locked_at = CURRENT_TIMESTAMP,
+    bill_locked_by = p_locked_by
+  WHERE id = p_admission_id;
+
+  -- Lock bill
+  UPDATE admission_bills
+  SET
+    is_locked = 1,
+    locked_at = CURRENT_TIMESTAMP,
+    locked_by = p_locked_by
+  WHERE admission_id = p_admission_id;
+
+  -- Audit log
+  INSERT INTO bill_audit_log (admission_id, bill_id, action, changed_by)
+  SELECT p_admission_id, id, 'BILL_LOCKED', p_locked_by
+  FROM admission_bills WHERE admission_id = p_admission_id;
+
+END$$
+
+DELIMITER ;
+
+-- =====================================================
+-- TRIGGERS
+-- =====================================================
+
+-- Trigger to update room status on admission
+DELIMITER $$
+
+DROP TRIGGER IF EXISTS `after_admission_insert`$$
+CREATE TRIGGER `after_admission_insert`
+AFTER INSERT ON `patient_admissions`
+FOR EACH ROW
+BEGIN
+  IF NEW.admission_type = 'IPD' AND NEW.room_id IS NOT NULL THEN
+    UPDATE rooms SET status = 'occupied' WHERE id = NEW.room_id;
+  END IF;
+END$$
+
+-- Trigger to update room status on discharge
+DROP TRIGGER IF EXISTS `after_admission_discharge`$$
+CREATE TRIGGER `after_admission_discharge`
+AFTER UPDATE ON `patient_admissions`
+FOR EACH ROW
+BEGIN
+  IF NEW.status = 'discharged' AND OLD.status != 'discharged' THEN
+    -- Free up the room
+    IF NEW.room_id IS NOT NULL THEN
+      UPDATE rooms SET status = 'available' WHERE id = NEW.room_id;
+    END IF;
+
+    -- Generate final room charges
+    CALL generate_room_charges(NEW.id);
+
+    -- Calculate final bill
+    CALL calculate_admission_bill(NEW.id);
+
+    -- Calculate total days
+    CALL calculate_admission_days(NEW.id);
+  END IF;
+END$$
+
+-- Trigger to prevent edits to locked bills
+DROP TRIGGER IF EXISTS `before_service_update`$$
+CREATE TRIGGER `before_service_update`
+BEFORE UPDATE ON `ipd_daily_services`
+FOR EACH ROW
+BEGIN
+  DECLARE v_locked TINYINT;
+  SELECT bill_locked INTO v_locked FROM patient_admissions WHERE id = NEW.admission_id;
+
+  IF v_locked = 1 THEN
+    SIGNAL SQLSTATE '45000'
+    SET MESSAGE_TEXT = 'Cannot modify services - bill is locked after discharge';
+  END IF;
+END$$
+
+DROP TRIGGER IF EXISTS `before_service_delete`$$
+CREATE TRIGGER `before_service_delete`
+BEFORE DELETE ON `ipd_daily_services`
+FOR EACH ROW
+BEGIN
+  DECLARE v_locked TINYINT;
+  SELECT bill_locked INTO v_locked FROM patient_admissions WHERE id = OLD.admission_id;
+
+  IF v_locked = 1 THEN
+    SIGNAL SQLSTATE '45000'
+    SET MESSAGE_TEXT = 'Cannot delete services - bill is locked after discharge';
+  END IF;
+END$$
+
+DROP TRIGGER IF EXISTS `before_medicine_update`$$
+CREATE TRIGGER `before_medicine_update`
+BEFORE UPDATE ON `ipd_medicines_consumables`
+FOR EACH ROW
+BEGIN
+  DECLARE v_locked TINYINT;
+  SELECT bill_locked INTO v_locked FROM patient_admissions WHERE id = NEW.admission_id;
+
+  IF v_locked = 1 THEN
+    SIGNAL SQLSTATE '45000'
+    SET MESSAGE_TEXT = 'Cannot modify medicines/consumables - bill is locked after discharge';
+  END IF;
+END$$
+
+-- Trigger to recalculate bill on service addition
+DROP TRIGGER IF EXISTS `after_service_insert`$$
+CREATE TRIGGER `after_service_insert`
+AFTER INSERT ON `ipd_daily_services`
+FOR EACH ROW
+BEGIN
+  CALL calculate_admission_bill(NEW.admission_id);
+END$$
+
+DROP TRIGGER IF EXISTS `after_service_modify`$$
+CREATE TRIGGER `after_service_modify`
+AFTER UPDATE ON `ipd_daily_services`
+FOR EACH ROW
+BEGIN
+  CALL calculate_admission_bill(NEW.admission_id);
+END$$
+
+-- Trigger to recalculate bill on medicine addition
+DROP TRIGGER IF EXISTS `after_medicine_insert`$$
+CREATE TRIGGER `after_medicine_insert`
+AFTER INSERT ON `ipd_medicines_consumables`
+FOR EACH ROW
+BEGIN
+  CALL calculate_admission_bill(NEW.admission_id);
+END$$
+
+DROP TRIGGER IF EXISTS `after_medicine_modify`$$
+CREATE TRIGGER `after_medicine_modify`
+AFTER UPDATE ON `ipd_medicines_consumables`
+FOR EACH ROW
+BEGIN
+  CALL calculate_admission_bill(NEW.admission_id);
+END$$
+
+-- Trigger to update advance on payment
+DROP TRIGGER IF EXISTS `after_payment_insert`$$
+CREATE TRIGGER `after_payment_insert`
+AFTER INSERT ON `admission_payments`
+FOR EACH ROW
+BEGIN
+  CALL update_advance_payment(NEW.admission_id);
+END$$
+
+DELIMITER ;
+
+-- =====================================================
+-- INDEXES FOR PERFORMANCE
+-- =====================================================
+
+-- Additional composite indexes for common queries
+CREATE INDEX idx_admissions_type_status ON patient_admissions(admission_type, status);
+CREATE INDEX idx_admissions_date_status ON patient_admissions(admission_date, status);
+CREATE INDEX idx_services_admission_date ON ipd_daily_services(admission_id, service_date);
+CREATE INDEX idx_medicines_admission_date ON ipd_medicines_consumables(admission_id, entry_date);
+
+-- =====================================================
+-- VIEWS FOR REPORTING
+-- =====================================================
+
+-- View for current IPD census
+CREATE OR REPLACE VIEW `v_current_ipd_census` AS
+SELECT
+  pa.id AS admission_id,
+  pa.admission_number,
+  p.patient_id,
+  p.name AS patient_name,
+  p.phone AS patient_phone,
+  d.id AS doctor_id,
+  u.name AS doctor_name,
+  r.room_number,
+  rt.type_name AS room_type,
+  pa.admission_date,
+  DATEDIFF(CURRENT_DATE, DATE(pa.admission_date)) + 1 AS days_admitted,
+  pa.chief_complaint,
+  pa.provisional_diagnosis
+FROM patient_admissions pa
+JOIN patients p ON pa.patient_id = p.id
+JOIN doctors d ON pa.doctor_id = d.id
+JOIN users u ON d.user_id = u.id
+LEFT JOIN rooms r ON pa.room_id = r.id
+LEFT JOIN room_types rt ON r.room_type_id = rt.id
+WHERE pa.admission_type = 'IPD' AND pa.status = 'admitted';
+
+-- View for admission bill summary
+CREATE OR REPLACE VIEW `v_admission_bill_summary` AS
+SELECT
+  pa.id AS admission_id,
+  pa.admission_number,
+  p.patient_id,
+  p.name AS patient_name,
+  pa.admission_date,
+  pa.discharge_date,
+  pa.total_days,
+  ab.bill_number,
+  ab.room_charges,
+  ab.services_charges,
+  ab.medicines_charges,
+  ab.consumables_charges,
+  ab.subtotal,
+  ab.discount_amount,
+  ab.gst_amount,
+  ab.gross_total,
+  ab.advance_paid,
+  ab.net_payable,
+  ab.amount_paid,
+  ab.balance_due,
+  ab.payment_status,
+  ab.is_locked
+FROM patient_admissions pa
+JOIN patients p ON pa.patient_id = p.id
+LEFT JOIN admission_bills ab ON pa.id = ab.admission_id;
+
+-- View for daily revenue by service type
+CREATE OR REPLACE VIEW `v_daily_revenue_summary` AS
+SELECT
+  service_date,
+  COUNT(DISTINCT admission_id) AS total_admissions,
+  SUM(CASE WHEN is_deleted = 0 THEN total_price ELSE 0 END) AS total_revenue,
+  SUM(CASE WHEN is_deleted = 0 AND service_category = 'Consultation' THEN total_price ELSE 0 END) AS consultation_revenue,
+  SUM(CASE WHEN is_deleted = 0 AND service_category = 'Procedure' THEN total_price ELSE 0 END) AS procedure_revenue,
+  SUM(CASE WHEN is_deleted = 0 AND service_category = 'Investigation' THEN total_price ELSE 0 END) AS investigation_revenue
+FROM ipd_daily_services
+GROUP BY service_date
+ORDER BY service_date DESC;
+
+
+
+-- =====================================================
+-- PERFORMANCE IMPROVEMENTS SQL
+-- Database Indexes & Optimizations
+-- Run this file to improve query performance
+-- =====================================================
+
+USE patient_management;
+
+-- =====================================================
+-- 1. PATIENT TABLE INDEXES
+-- =====================================================
+
+-- Speed up patient name searches
+CREATE INDEX IF NOT EXISTS idx_patient_name ON patients(name);
+
+-- Speed up phone number searches
+CREATE INDEX IF NOT EXISTS idx_patient_phone ON patients(phone);
+
+-- Speed up email searches
+CREATE INDEX IF NOT EXISTS idx_patient_email ON patients(email);
+
+-- Composite index for clinic-specific queries with sorting
+CREATE INDEX IF NOT EXISTS idx_patient_clinic_created ON patients(clinic_id, created_at DESC);
+
+-- Full-text search index for better performance on name and email
+ALTER TABLE patients ADD FULLTEXT INDEX IF NOT EXISTS idx_fulltext_patient_search (name, email);
+
+-- =====================================================
+-- 2. APPOINTMENT TABLE INDEXES
+-- =====================================================
+
+-- Speed up appointment date queries
+CREATE INDEX IF NOT EXISTS idx_appointment_date ON appointments(appointment_date);
+
+-- Speed up status filtering
+CREATE INDEX IF NOT EXISTS idx_appointment_status ON appointments(status);
+
+-- Composite index for doctor's appointments by date
+CREATE INDEX IF NOT EXISTS idx_appointment_doctor_date ON appointments(doctor_id, appointment_date DESC);
+
+-- Composite index for patient's appointments
+CREATE INDEX IF NOT EXISTS idx_appointment_patient_date ON appointments(patient_id, appointment_date DESC);
+
+-- Speed up today's queue queries
+CREATE INDEX IF NOT EXISTS idx_appointment_checkin ON appointments(status, checked_in_at);
+
+-- =====================================================
+-- 3. PATIENT ADMISSIONS INDEXES
+-- =====================================================
+
+-- Speed up admission number lookups
+CREATE INDEX IF NOT EXISTS idx_admission_number ON patient_admissions(admission_number);
+
+-- Speed up status filtering
+CREATE INDEX IF NOT EXISTS idx_admission_status ON patient_admissions(status);
+
+-- Composite index for admission date filtering
+CREATE INDEX IF NOT EXISTS idx_admission_date_status ON patient_admissions(admission_date DESC, status);
+
+-- Speed up doctor's admissions
+CREATE INDEX IF NOT EXISTS idx_admission_doctor ON patient_admissions(doctor_id, status);
+
+-- Speed up room lookups
+CREATE INDEX IF NOT EXISTS idx_admission_room ON patient_admissions(room_id, status);
+
+-- =====================================================
+-- 4. IPD SERVICE TABLES INDEXES
+-- =====================================================
+
+-- Speed up daily services by admission
+CREATE INDEX IF NOT EXISTS idx_ipd_services_admission ON ipd_daily_services(admission_id, service_date DESC);
+
+-- Speed up medicines by admission
+CREATE INDEX IF NOT EXISTS idx_ipd_medicines_admission ON ipd_medicines_consumables(admission_id, administered_date DESC);
+
+-- Speed up room charges by admission
+CREATE INDEX IF NOT EXISTS idx_ipd_room_charges_admission ON ipd_room_charges(admission_id);
+
+-- =====================================================
+-- 5. BILLING TABLE INDEXES
+-- =====================================================
+
+-- Speed up bill patient lookups
+CREATE INDEX IF NOT EXISTS idx_bill_patient ON bills(patient_id, created_at DESC);
+
+-- Speed up payment status filtering
+CREATE INDEX IF NOT EXISTS idx_bill_payment_status ON bills(payment_status);
+
+-- Speed up bill date range queries
+CREATE INDEX IF NOT EXISTS idx_bill_date_status ON bills(created_at DESC, payment_status);
+
+-- Speed up appointment bill lookups
+CREATE INDEX IF NOT EXISTS idx_bill_appointment ON bills(appointment_id);
+
+-- =====================================================
+-- 6. PRESCRIPTION TABLE INDEXES
+-- =====================================================
+
+-- Speed up patient prescription history
+CREATE INDEX IF NOT EXISTS idx_prescription_patient ON prescriptions(patient_id, created_at DESC);
+
+-- Speed up doctor's prescriptions
+CREATE INDEX IF NOT EXISTS idx_prescription_doctor ON prescriptions(doctor_id, created_at DESC);
+
+-- Speed up prescription items lookup
+CREATE INDEX IF NOT EXISTS idx_prescription_items ON prescription_items(prescription_id);
+
+-- =====================================================
+-- 7. LAB INVESTIGATIONS INDEXES
+-- =====================================================
+
+-- Speed up patient lab history
+CREATE INDEX IF NOT EXISTS idx_lab_patient ON lab_investigations(patient_id, investigation_date DESC);
+
+-- Speed up lab status filtering
+CREATE INDEX IF NOT EXISTS idx_lab_status ON lab_investigations(status, investigation_date DESC);
+
+-- =====================================================
+-- 8. AUDIT LOGS INDEXES
+-- =====================================================
+
+-- Speed up audit log date queries
+CREATE INDEX IF NOT EXISTS idx_audit_date ON audit_logs(created_at DESC);
+
+-- Speed up user action filtering
+CREATE INDEX IF NOT EXISTS idx_audit_user_action ON audit_logs(user_id, action, created_at DESC);
+
+-- Speed up entity lookups
+CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_logs(entity, entity_id, created_at DESC);
+
+-- =====================================================
+-- 9. ROOMS TABLE INDEXES
+-- =====================================================
+
+-- Speed up room status filtering
+CREATE INDEX IF NOT EXISTS idx_room_status ON rooms(status);
+
+-- Speed up room type filtering
+CREATE INDEX IF NOT EXISTS idx_room_type ON rooms(room_type_id, status);
+
+-- Speed up current patient lookup
+CREATE INDEX IF NOT EXISTS idx_room_patient ON rooms(current_patient_id);
+
+-- =====================================================
+-- 10. USERS TABLE INDEXES
+-- =====================================================
+
+-- Speed up user email lookups (for login)
+CREATE INDEX IF NOT EXISTS idx_user_email ON users(email);
+
+-- Speed up role filtering
+CREATE INDEX IF NOT EXISTS idx_user_role ON users(role, is_active);
+
+-- Speed up clinic user lookups
+CREATE INDEX IF NOT EXISTS idx_user_clinic ON users(clinic_id, role);
+
+-- =====================================================
+-- 11. DOCTORS TABLE INDEXES
+-- =====================================================
+
+-- Speed up doctor specialization filtering
+CREATE INDEX IF NOT EXISTS idx_doctor_specialization ON doctors(specialization);
+
+-- Speed up doctor status filtering
+CREATE INDEX IF NOT EXISTS idx_doctor_status ON doctors(is_active);
+
+-- =====================================================
+-- 12. MEDICINE & TEMPLATES INDEXES
+-- =====================================================
+
+-- Speed up medicine name searches
+CREATE INDEX IF NOT EXISTS idx_medicine_name ON medicines(name);
+
+-- Full-text search for medicine names
+ALTER TABLE medicines ADD FULLTEXT INDEX IF NOT EXISTS idx_fulltext_medicine_name (name);
+
+-- Speed up template lookups
+CREATE INDEX IF NOT EXISTS idx_prescription_template_doctor ON prescription_templates(doctor_id);
+
+-- =====================================================
+-- OPTIMIZATION QUERIES TO TEST PERFORMANCE
+-- =====================================================
+
+-- Test 1: Patient Search (should use idx_fulltext_patient_search)
+-- SELECT * FROM patients WHERE MATCH(name, email) AGAINST('John' IN BOOLEAN MODE);
+
+-- Test 2: Today's Queue (should use idx_appointment_date and idx_appointment_status)
+-- SELECT * FROM appointments
+-- WHERE appointment_date = CURDATE() AND status = 'checked-in'
+-- ORDER BY checked_in_at;
+
+-- Test 3: Active Admissions (should use idx_admission_status)
+-- SELECT * FROM patient_admissions WHERE status = 'admitted' ORDER BY admission_date DESC;
+
+-- Test 4: Patient Prescription History (should use idx_prescription_patient)
+-- SELECT * FROM prescriptions WHERE patient_id = 1 ORDER BY created_at DESC LIMIT 10;
+
+-- Test 5: Audit Logs by Date (should use idx_audit_date)
+-- SELECT * FROM audit_logs WHERE created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY) ORDER BY created_at DESC;
+
+-- =====================================================
+-- ANALYZE TABLES AFTER INDEX CREATION
+-- =====================================================
+
+ANALYZE TABLE patients;
+ANALYZE TABLE appointments;
+ANALYZE TABLE patient_admissions;
+ANALYZE TABLE ipd_daily_services;
+ANALYZE TABLE ipd_medicines_consumables;
+ANALYZE TABLE bills;
+ANALYZE TABLE prescriptions;
+ANALYZE TABLE lab_investigations;
+ANALYZE TABLE audit_logs;
+ANALYZE TABLE rooms;
+ANALYZE TABLE users;
+ANALYZE TABLE doctors;
+ANALYZE TABLE medicines;
+
+-- =====================================================
+-- VERIFICATION: Check Created Indexes
+-- =====================================================
+
+-- Run this to see all indexes:
+-- SHOW INDEX FROM patients;
+-- SHOW INDEX FROM appointments;
+-- SHOW INDEX FROM patient_admissions;
+
+-- =====================================================
+-- NOTES:
+-- =====================================================
+-- 1. These indexes will improve SELECT query performance
+-- 2. They may slightly slow down INSERT/UPDATE/DELETE operations
+-- 3. Full-text indexes require InnoDB engine (MySQL 5.6+)
+-- 4. Monitor query performance using EXPLAIN before and after
+-- 5. Consider removing unused indexes if they don't improve performance
+-- =====================================================
+
+SELECT 'Performance indexes created successfully!' as Status;
+
+
+-- =====================================================
+-- SAMPLE QUERIES FOR TESTING
+-- =====================================================
+
+/*
+
+-- 1. Create a new IPD admission
+INSERT INTO patient_admissions (
+  admission_number, patient_id, admission_type, doctor_id, clinic_id,
+  admission_date, admission_time, room_id, bed_number,
+  chief_complaint, provisional_diagnosis, admitted_by
+) VALUES (
+  'IPD-2026-00001', 1, 'IPD', 1, 1,
+  '2026-01-06 10:30:00', '10:30:00', 1, 'Bed-A',
+  'Fever and abdominal pain', 'Suspected appendicitis', 1
+);
+
+-- 2. Add daily services
+INSERT INTO ipd_daily_services (
+  admission_id, service_date, service_name, service_category,
+  quantity, unit_price, total_price, doctor_id, created_by
+) VALUES
+  (1, '2026-01-06', 'Consultation', 'Consultation', 1, 500.00, 500.00, 1, 1),
+  (1, '2026-01-06', 'Blood Test - Complete', 'Investigation', 1, 300.00, 300.00, 1, 1),
+  (1, '2026-01-07', 'X-Ray Abdomen', 'Investigation', 1, 800.00, 800.00, 1, 1);
+
+-- 3. Add medicines
+INSERT INTO ipd_medicines_consumables (
+  admission_id, entry_date, entry_time, item_type, item_name,
+  dosage, quantity, unit, unit_price, total_price, administered_by, created_by
+) VALUES
+  (1, '2026-01-06', '14:00:00', 'medicine', 'Paracetamol 500mg', '1 tablet', 3, 'tablet', 5.00, 15.00, 2, 2),
+  (1, '2026-01-06', '20:00:00', 'medicine', 'Ciprofloxacin 500mg', '1 tablet', 1, 'tablet', 15.00, 15.00, 2, 2);
+
+-- 4. Add advance payment
+INSERT INTO admission_payments (
+  admission_id, payment_date, payment_type, amount, payment_method, received_by
+) VALUES
+  (1, '2026-01-06 11:00:00', 'advance', 5000.00, 'Cash', 1);
+
+-- 5. Generate room charges
+CALL generate_room_charges(1);
+
+-- 6. Calculate bill
+CALL calculate_admission_bill(1);
+
+-- 7. View current bill
+SELECT * FROM admission_bills WHERE admission_id = 1;
+
+-- 8. Discharge patient
+UPDATE patient_admissions
+SET
+  status = 'discharged',
+  discharge_date = '2026-01-08 09:00:00',
+  discharge_time = '09:00:00',
+  final_diagnosis = 'Acute Appendicitis - Operated',
+  discharged_by = 1
+WHERE id = 1;
+
+-- 9. Lock bill after discharge
+CALL lock_admission_bill(1, 1);
+
+-- 10. View IPD census
+SELECT * FROM v_current_ipd_census;
+
+-- 11. View bill summary
+SELECT * FROM v_admission_bill_summary WHERE admission_id = 1;
+
+-- 12. View daily revenue
+SELECT * FROM v_daily_revenue_summary;
+
+*/
+
+-- =====================================================
+-- COMMIT TRANSACTION
+-- =====================================================
+
+COMMIT;
+
+-- =====================================================
+-- SUCCESS MESSAGE
+-- =====================================================
+
+SELECT CONCAT(
+  'IPD-OPD Extension installed successfully!',
+  CHAR(10),
+  'Tables created: 11',
+  CHAR(10),
+  'Stored Procedures: 6',
+  CHAR(10),
+  'Triggers: 10',
+  CHAR(10),
+  'Views: 3',
+  CHAR(10),
+  'Status: Ready for use'
+) AS installation_status;
+
+-- =====================================================
+-- END OF SCRIPT
+-- =====================================================
+
+
 COMMIT;

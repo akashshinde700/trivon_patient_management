@@ -36,13 +36,12 @@ export default function LabInvestigations() {
               return aOrder - bOrder;
             });
           } catch (error) {
-            console.error('Failed to parse saved order:', error);
+            // Invalid saved order, use default sorting
           }
         }
 
         setTests(labs);
       } catch (error) {
-        console.error('Failed to load lab investigations:', error);
         addToast('Failed to load lab investigations', 'error');
       }
     };

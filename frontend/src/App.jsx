@@ -46,6 +46,14 @@ const Settings = lazy(() => import('./pages/Settings'));
 const LabManagement = lazy(() => import('./pages/LabManagement'));
 const InsuranceManagement = lazy(() => import('./pages/InsuranceManagement'));
 
+// IPD-OPD Management Pages
+const Admissions = lazy(() => import('./pages/Admissions'));
+const IPDDashboard = lazy(() => import('./pages/IPDDashboard'));
+const RoomManagement = lazy(() => import('./pages/RoomManagement'));
+const DailyServicesEntry = lazy(() => import('./pages/DailyServicesEntry'));
+const MedicineEntry = lazy(() => import('./pages/MedicineEntry'));
+const DischargeWorkflow = lazy(() => import('./pages/DischargeWorkflow'));
+
 function App() {
   const { token } = useAuth();
 
@@ -230,6 +238,48 @@ function App() {
               </Suspense>
             </MainLayout>
           } />
+          <Route path="/admissions" element={
+            <MainLayout>
+              <Suspense fallback={<div className="flex items-center justify-center h-64"><div className="text-lg">Loading...</div></div>}>
+                <Admissions />
+              </Suspense>
+            </MainLayout>
+          } />
+          <Route path="/ipd-dashboard" element={
+            <MainLayout>
+              <Suspense fallback={<div className="flex items-center justify-center h-64"><div className="text-lg">Loading...</div></div>}>
+                <IPDDashboard />
+              </Suspense>
+            </MainLayout>
+          } />
+          <Route path="/room-management" element={
+            <MainLayout>
+              <Suspense fallback={<div className="flex items-center justify-center h-64"><div className="text-lg">Loading...</div></div>}>
+                <RoomManagement />
+              </Suspense>
+            </MainLayout>
+          } />
+          <Route path="/daily-services" element={
+            <MainLayout>
+              <Suspense fallback={<div className="flex items-center justify-center h-64"><div className="text-lg">Loading...</div></div>}>
+                <DailyServicesEntry />
+              </Suspense>
+            </MainLayout>
+          } />
+          <Route path="/medicine-entry" element={
+            <MainLayout>
+              <Suspense fallback={<div className="flex items-center justify-center h-64"><div className="text-lg">Loading...</div></div>}>
+                <MedicineEntry />
+              </Suspense>
+            </MainLayout>
+          } />
+          <Route path="/discharge-workflow" element={
+            <MainLayout>
+              <Suspense fallback={<div className="flex items-center justify-center h-64"><div className="text-lg">Loading...</div></div>}>
+                <DischargeWorkflow />
+              </Suspense>
+            </MainLayout>
+          } />
           <Route path="/doctor-export" element={
             <MainLayout>
               <Suspense fallback={<div className="flex items-center justify-center h-64"><div className="text-lg">Loading...</div></div>}>
@@ -282,7 +332,7 @@ function App() {
           <Route path="/doctor-settings" element={
             <MainLayout>
               <Suspense fallback={<div className="flex items-center justify-center h-64"><div className="text-lg">Loading...</div></div>}>
-                <RequireRole allowedRoles={['doctor']}>
+                <RequireRole allowed={['doctor']}>
                   <DoctorSettings />
                 </RequireRole>
               </Suspense>

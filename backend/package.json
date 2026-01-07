@@ -6,7 +6,9 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
-    "setup-admin": "node ../scripts/setup-admin.js"
+    "setup-admin": "node ../scripts/setup-admin.js",
+    "lint": "eslint src --ext .js",
+    "lint:fix": "eslint src --ext .js --fix"
   },
   "keywords": [],
   "author": "",

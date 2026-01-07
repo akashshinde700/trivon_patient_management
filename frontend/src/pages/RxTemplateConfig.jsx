@@ -1,10 +1,10 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useToast } from '../hooks/useToast';
-// import { useApiClient } from '../api/client';
+import { useApiClient } from '../api/client';
 
 export default function RxTemplateConfig() {
   const { addToast } = useToast();
-  // const api = useApiClient();
+  const api = useApiClient();
   const [activeTab, setActiveTab] = useState('print');
   const [selectedClinic, setSelectedClinic] = useState('Metropolis Vidhyavihar');
   const [autoFitHeight, setAutoFitHeight] = useState(false);
@@ -13,6 +13,26 @@ export default function RxTemplateConfig() {
   const [headerFile, setHeaderFile] = useState(null);
   const [footerFile, setFooterFile] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [configId, setConfigId] = useState(null);
+
+  // Load existing configuration on component mount
+  useEffect(() => {
+    const loadConfiguration = async () => {
+      try {
+        const response = await api.get('/api/pad-configuration');
+        if (response.data.config) {
+          const config = response.data.config;
+          setConfigId(config.id);
+          setAutoFitHeight(config.auto_fit_height || false);
+          setSpaceSaverLayout(config.space_saver_layout || false);
+          setSelectedClinic(config.clinic_name || 'Metropolis Vidhyavihar');
+        }
+      } catch (error) {
+        // Configuration not found, use defaults
+      }
+    };
+    loadConfiguration();
+  }, [api]);
 
   const sections = [
     { name: 'Diagnosis', icon: '🔬', color: 'text-purple-600', bgColor: 'bg-purple-50' },
@@ -27,37 +47,73 @@ export default function RxTemplateConfig() {
     { name: 'Follow Up', icon: '🔄', color: 'text-indigo-600', bgColor: 'bg-indigo-50' }
   ];
 
-  const handleFileUpload = (type, file) => {
+  const handleFileUpload = async (type, file) => {
     if (file) {
-      switch (type) {
-        case 'letterhead':
-          setLetterheadFile(file);
-          addToast('Letterhead uploaded successfully', 'success');
-          break;
-        case 'header':
-          setHeaderFile(file);
-          addToast('Header uploaded successfully', 'success');
-          break;
-        case 'footer':
-          setFooterFile(file);
-          addToast('Footer uploaded successfully', 'success');
-          break;
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('type', type);
+
+        await api.post('/api/pad-configuration/upload', formData, {
+          headers: { 'Content-Type': 'multipart/form-data' }
+        });
+
+        switch (type) {
+          case 'letterhead':
+            setLetterheadFile(file);
+            addToast('Letterhead uploaded successfully', 'success');
+            break;
+          case 'header':
+            setHeaderFile(file);
+            addToast('Header uploaded successfully', 'success');
+            break;
+          case 'footer':
+            setFooterFile(file);
+            addToast('Footer uploaded successfully', 'success');
+            break;
+        }
+      } catch (error) {
+        addToast(`Failed to upload ${type}`, 'error');
       }
     }
   };
 
-  const handleDownload = (type) => {
-    // Mock download functionality
-    addToast(`${type} download initiated`, 'info');
+  const handleDownload = async (type) => {
+    try {
+      const response = await api.get(`/api/pad-configuration/download/${type}`, {
+        responseType: 'blob'
+      });
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `${type}.png`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      addToast(`${type} downloaded successfully`, 'success');
+    } catch (error) {
+      addToast(`Failed to download ${type}`, 'error');
+    }
   };
 
   const handleSave = async () => {
     setLoading(true);
     try {
-      // TODO: Implement backend API call
-      await new Promise(resolve => setTimeout(resolve, 1000)); // Mock API call
+      const configData = {
+        auto_fit_height: autoFitHeight,
+        space_saver_layout: spaceSaverLayout,
+        clinic_name: selectedClinic
+      };
+
+      if (configId) {
+        await api.put(`/api/pad-configuration/${configId}`, configData);
+      } else {
+        const response = await api.post('/api/pad-configuration', configData);
+        setConfigId(response.data.id);
+      }
+
       addToast('Template configuration saved successfully', 'success');
-    } catch {
+    } catch (error) {
       addToast('Failed to save configuration', 'error');
     } finally {
       setLoading(false);

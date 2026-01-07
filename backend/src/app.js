@@ -38,6 +38,11 @@ const diagnosisTemplateRoutes = require('./routes/diagnosisTemplateRoutes');
 const medicationsTemplateRoutes = require('./routes/medicationsTemplateRoutes');
 const staffRoutes = require('./routes/staffRoutes');
 
+// IPD-OPD Management Routes
+const admissionRoutes = require('./routes/admissionRoutes');
+const ipdRoutes = require('./routes/ipdRoutes');
+const roomRoutes = require('./routes/roomRoutes');
+
 const app = express();
 
 // Security and parsing middleware
@@ -134,6 +139,11 @@ app.use('/api/symptom-medications', symptomMedicationRoutes);
 app.use('/api/diagnosis-templates', diagnosisTemplateRoutes);
 app.use('/api/medications-templates', medicationsTemplateRoutes);
 app.use('/api/staff', staffRoutes);
+
+// IPD-OPD Management Routes
+app.use('/api/admissions', admissionRoutes);
+app.use('/api/ipd', ipdRoutes);
+app.use('/api/rooms', roomRoutes);
 
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
 

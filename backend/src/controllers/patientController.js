@@ -202,12 +202,21 @@ async function addPatient(req, res) {
     });
   } catch (error) {
     console.error('Error adding patient:', error);
-    
-    // Handle duplicate entry error
+
+    // Handle duplicate entry error with specific field detection
     if (error.code === 'ER_DUP_ENTRY') {
-      return res.status(409).json({ error: 'Patient ID already exists' });
+      if (error.message.includes('email')) {
+        return res.status(409).json({ error: 'A patient with this email already exists' });
+      }
+      if (error.message.includes('phone')) {
+        return res.status(409).json({ error: 'A patient with this phone number already exists' });
+      }
+      if (error.message.includes('patient_id')) {
+        return res.status(409).json({ error: 'Patient ID already exists' });
+      }
+      return res.status(409).json({ error: 'Duplicate entry detected' });
     }
-    
+
     res.status(500).json({ error: 'Failed to add patient', details: error.message });
   }
 }

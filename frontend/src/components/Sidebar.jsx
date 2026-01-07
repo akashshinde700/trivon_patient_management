@@ -21,7 +21,10 @@ import {
   FiLayout,
   FiClock,
   FiDownload,
-  FiHeart
+  FiHeart,
+  FiPlusSquare,
+  FiPackage,
+  FiCheckCircle
 } from 'react-icons/fi';
 
 const navItems = [
@@ -35,6 +38,12 @@ const navItems = [
   { label: 'Insurance', icon: <FiShield />, to: '/insurance-management' },
   { label: 'Analytics', icon: <FiBarChart2 />, to: '/analytics' },
   { label: 'ABHA', icon: <FiActivity />, to: '/abha', badge: 'New' },
+  { label: 'IPD Dashboard', icon: <FiGrid />, to: '/ipd-dashboard' },
+  { label: 'Admissions', icon: <FiHeart />, to: '/admissions' },
+  { label: 'Room Management', icon: <FiLayout />, to: '/room-management' },
+  { label: 'Daily Services', icon: <FiPlusSquare />, to: '/daily-services' },
+  { label: 'Medicine Entry', icon: <FiPackage />, to: '/medicine-entry' },
+  { label: 'Discharge Workflow', icon: <FiCheckCircle />, to: '/discharge-workflow' },
   { label: 'Doctor Settings', icon: <FiClock />, to: '/doctor-settings', doctorOnly: true },
   { label: 'Clinic Management', icon: <FiLayout />, to: '/clinics', adminOnly: true },
   { label: 'Doctor Management', icon: <FiUsers />, to: '/doctor-management', adminOnly: true },
