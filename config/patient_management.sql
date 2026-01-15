@@ -2092,8 +2092,10 @@ CREATE INDEX idx_appointments_date ON appointments(appointment_date);
 CREATE INDEX idx_appointments_status ON appointments(status);
 CREATE INDEX idx_appointments_clinic ON appointments(clinic_id);
 
--- Composite index for common queries
+-- Composite index for common queries (safe recreate to avoid duplicate key errors)
+DROP INDEX IF EXISTS idx_appointments_doctor_date ON appointments;
 CREATE INDEX idx_appointments_doctor_date ON appointments(doctor_id, appointment_date);
+DROP INDEX IF EXISTS idx_appointments_status_date ON appointments;
 CREATE INDEX idx_appointments_status_date ON appointments(status, appointment_date);
 
 -- PRESCRIPTIONS TABLE INDEXES
@@ -2133,7 +2135,8 @@ CREATE INDEX idx_patients_email ON patients(email);
 CREATE INDEX idx_patients_name ON patients(name);
 CREATE INDEX idx_patients_clinic ON patients(clinic_id);
 
--- Full-text search index for patient search
+-- Full-text search index for patient search (idempotent)
+DROP INDEX IF EXISTS idx_patients_search ON patients;
 ALTER TABLE patients ADD FULLTEXT idx_patients_search (name, phone, email);
 
 -- USERS TABLE INDEXES
@@ -2157,14 +2160,13 @@ CREATE INDEX idx_doctors_user ON doctors(user_id);
 CREATE INDEX idx_doctors_clinic ON doctors(clinic_id);
 CREATE INDEX idx_doctors_status ON doctors(status);
 
--- STAFF TABLE INDEXES
-DROP INDEX IF EXISTS idx_staff_user ON staff;
-DROP INDEX IF EXISTS idx_staff_clinic ON staff;
-DROP INDEX IF EXISTS idx_staff_doctor ON staff;
-
-CREATE INDEX idx_staff_user ON staff(user_id);
-CREATE INDEX idx_staff_clinic ON staff(clinic_id);
-CREATE INDEX idx_staff_doctor ON staff(doctor_id);
+-- STAFF TABLE INDEXES (fixed to actual tables)
+DROP INDEX IF EXISTS idx_clinic_staff_user ON clinic_staff;
+CREATE INDEX idx_clinic_staff_user ON clinic_staff(user_id);
+DROP INDEX IF EXISTS idx_clinic_staff_clinic ON clinic_staff;
+CREATE INDEX idx_clinic_staff_clinic ON clinic_staff(clinic_id);
+DROP INDEX IF EXISTS idx_doctor_staff_doctor ON doctor_staff;
+CREATE INDEX idx_doctor_staff_doctor ON doctor_staff(doctor_id);
 
 -- CLINICS TABLE INDEXES
 DROP INDEX IF EXISTS idx_clinics_active ON clinics;
@@ -2173,14 +2175,13 @@ DROP INDEX IF EXISTS idx_clinics_name ON clinics;
 CREATE INDEX idx_clinics_active ON clinics(is_active);
 CREATE INDEX idx_clinics_name ON clinics(name);
 
--- LAB TESTS TABLE INDEXES
-DROP INDEX IF EXISTS idx_lab_patient ON lab_tests;
-DROP INDEX IF EXISTS idx_lab_appointment ON lab_tests;
-DROP INDEX IF EXISTS idx_lab_date ON lab_tests;
-
-CREATE INDEX idx_lab_patient ON lab_tests(patient_id);
-CREATE INDEX idx_lab_appointment ON lab_tests(appointment_id);
-CREATE INDEX idx_lab_date ON lab_tests(test_date);
+-- LAB TABLE INDEXES (fixed)
+DROP INDEX IF EXISTS idx_lab_investigations_patient_id ON lab_investigations;
+CREATE INDEX idx_lab_investigations_patient_id ON lab_investigations(patient_id);
+DROP INDEX IF EXISTS idx_lab_investigations_appointment ON lab_investigations;
+CREATE INDEX idx_lab_investigations_appointment ON lab_investigations(appointment_id);
+DROP INDEX IF EXISTS idx_test_reports_date ON test_reports;
+CREATE INDEX idx_test_reports_date ON test_reports(test_date);
 
 -- AUDIT LOGS TABLE INDEXES
 DROP INDEX IF EXISTS idx_audit_user ON audit_logs;
@@ -2191,7 +2192,7 @@ DROP INDEX IF EXISTS idx_audit_entity ON audit_logs;
 CREATE INDEX idx_audit_user ON audit_logs(user_id);
 CREATE INDEX idx_audit_action ON audit_logs(action);
 CREATE INDEX idx_audit_date ON audit_logs(created_at);
-CREATE INDEX idx_audit_entity ON audit_logs(entity_type, entity_id);
+CREATE INDEX idx_audit_entity ON audit_logs(entity, entity_id);
 
 -- NOTIFICATIONS TABLE INDEXES
 DROP INDEX IF EXISTS idx_notif_user ON notifications;
@@ -3032,7 +3033,7 @@ CREATE INDEX IF NOT EXISTS idx_patient_email ON patients(email);
 CREATE INDEX IF NOT EXISTS idx_patient_clinic_created ON patients(clinic_id, created_at DESC);
 
 -- Full-text search index for better performance on name and email
-ALTER TABLE patients ADD FULLTEXT INDEX IF NOT EXISTS idx_fulltext_patient_search (name, email);
+-- Removed duplicate; using idx_patients_search (name, phone, email)
 
 -- =====================================================
 -- 2. APPOINTMENT TABLE INDEXES
@@ -3080,7 +3081,7 @@ CREATE INDEX IF NOT EXISTS idx_admission_room ON patient_admissions(room_id, sta
 CREATE INDEX IF NOT EXISTS idx_ipd_services_admission ON ipd_daily_services(admission_id, service_date DESC);
 
 -- Speed up medicines by admission
-CREATE INDEX IF NOT EXISTS idx_ipd_medicines_admission ON ipd_medicines_consumables(admission_id, administered_date DESC);
+CREATE INDEX IF NOT EXISTS idx_ipd_medicines_admission ON ipd_medicines_consumables(admission_id, entry_date DESC);
 
 -- Speed up room charges by admission
 CREATE INDEX IF NOT EXISTS idx_ipd_room_charges_admission ON ipd_room_charges(admission_id);
@@ -3119,10 +3120,10 @@ CREATE INDEX IF NOT EXISTS idx_prescription_items ON prescription_items(prescrip
 -- =====================================================
 
 -- Speed up patient lab history
-CREATE INDEX IF NOT EXISTS idx_lab_patient ON lab_investigations(patient_id, investigation_date DESC);
+CREATE INDEX IF NOT EXISTS idx_lab_patient ON lab_investigations(patient_id, ordered_date DESC);
 
 -- Speed up lab status filtering
-CREATE INDEX IF NOT EXISTS idx_lab_status ON lab_investigations(status, investigation_date DESC);
+CREATE INDEX IF NOT EXISTS idx_lab_status ON lab_investigations(status, ordered_date DESC);
 
 -- =====================================================
 -- 8. AUDIT LOGS INDEXES
@@ -3135,7 +3136,7 @@ CREATE INDEX IF NOT EXISTS idx_audit_date ON audit_logs(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_user_action ON audit_logs(user_id, action, created_at DESC);
 
 -- Speed up entity lookups
-CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_logs(entity, entity_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_entity_cd ON audit_logs(entity, entity_id, created_at DESC);
 
 -- =====================================================
 -- 9. ROOMS TABLE INDEXES
@@ -3148,7 +3149,7 @@ CREATE INDEX IF NOT EXISTS idx_room_status ON rooms(status);
 CREATE INDEX IF NOT EXISTS idx_room_type ON rooms(room_type_id, status);
 
 -- Speed up current patient lookup
-CREATE INDEX IF NOT EXISTS idx_room_patient ON rooms(current_patient_id);
+CREATE INDEX IF NOT EXISTS idx_room_patient ON rooms(current_admission_id);
 
 -- =====================================================
 -- 10. USERS TABLE INDEXES
