@@ -1,4 +1,30 @@
-﻿-- =====================================================
+-- =====================================================
+-- COMPLETE PATIENT MANAGEMENT DATABASE SCHEMA
+-- Production-Ready SQL Migration
+-- =====================================================
+-- Generated: 2026-01-13
+-- Database: patient_management
+-- Engine: InnoDB
+-- Charset: utf8mb4
+-- Collation: utf8mb4_unicode_ci
+-- Total Tables: 58+
+-- =====================================================
+
+SET SQL_MODE = "NO_AUTO_VALUE_ON_ZERO";
+SET FOREIGN_KEY_CHECKS = 0;
+SET time_zone = "+00:00";
+
+-- =====================================================
+-- DATABASE SETUP
+-- =====================================================
+
+CREATE DATABASE IF NOT EXISTS `patient_management`
+  DEFAULT CHARACTER SET utf8mb4
+  COLLATE utf8mb4_unicode_ci;
+
+USE `patient_management`;
+SET FOREIGN_KEY_CHECKS = 1;
+-- =====================================================
 -- Full Patient Management DB Schema (Updated)
 -- Fully compatible with MariaDB 10.4.32
 -- Charset: utf8mb4 / Collation: utf8mb4_unicode_ci
@@ -22,6 +48,8 @@ CREATE TABLE IF NOT EXISTS `users` (
   `name` VARCHAR(255) NOT NULL,
   `phone` VARCHAR(20) DEFAULT NULL,
   `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+  `last_login` TIMESTAMP NULL DEFAULT NULL,
+  `failed_login_attempts` INT DEFAULT 0,
   `clinic_id` INT(11) DEFAULT NULL,
   `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -53,6 +81,25 @@ CREATE TABLE IF NOT EXISTS `clinics` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =====================================================
+-- TABLE: clinic_holidays
+-- =====================================================
+CREATE TABLE IF NOT EXISTS `clinic_holidays` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `clinic_id` INT DEFAULT NULL,
+  `doctor_id` INT DEFAULT NULL,
+  `holiday_date` DATE NOT NULL,
+  `title` VARCHAR(255) NOT NULL,
+  `is_full_day` TINYINT(1) DEFAULT 1,
+  `start_time` TIME DEFAULT NULL,
+  `end_time` TIME DEFAULT NULL,
+  `notes` TEXT,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY `uk_holiday` (`clinic_id`,`doctor_id`,`holiday_date`),
+  FOREIGN KEY (`clinic_id`) REFERENCES `clinics`(`id`) ON DELETE CASCADE,
+  FOREIGN KEY (`doctor_id`) REFERENCES `doctors`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =====================================================
 -- TABLE: doctors
 -- =====================================================
 CREATE TABLE IF NOT EXISTS `doctors` (
@@ -62,10 +109,13 @@ CREATE TABLE IF NOT EXISTS `doctors` (
   `specialization` VARCHAR(100) DEFAULT NULL,
   `license_number` VARCHAR(100) DEFAULT NULL,
   `consultation_fee` DECIMAL(10,2) DEFAULT NULL,
+  `online_consultation_fee` DECIMAL(10,2) DEFAULT NULL,
   `available_from` TIME DEFAULT NULL,
   `available_to` TIME DEFAULT NULL,
   `qualification` VARCHAR(255) DEFAULT NULL,
   `experience_years` INT DEFAULT 0,
+  `max_patients_per_day` INT DEFAULT 40,
+  `slot_buffer_minutes` INT DEFAULT 5,
   `available_days` JSON DEFAULT NULL,
   `available_time_slots` JSON DEFAULT NULL,
   `eka_credits` DECIMAL(10,2) DEFAULT 0.00,
@@ -128,6 +178,8 @@ CREATE TABLE IF NOT EXISTS `patients` (
   `phone` VARCHAR(20) DEFAULT NULL,
   `dob` DATE DEFAULT NULL,
   `gender` ENUM('M','F','Other') DEFAULT NULL,
+  `marital_status` ENUM('Single','Married','Divorced','Widowed','Other') DEFAULT NULL,
+  `occupation` VARCHAR(100) DEFAULT NULL,
   `blood_group` VARCHAR(5) DEFAULT NULL,
   `address` TEXT DEFAULT NULL,
   `city` VARCHAR(100) DEFAULT NULL,
@@ -138,14 +190,23 @@ CREATE TABLE IF NOT EXISTS `patients` (
   `medical_conditions` TEXT DEFAULT NULL,
   `allergies` TEXT DEFAULT NULL,
   `current_medications` TEXT DEFAULT NULL,
+  `clinic_id` INT(11) DEFAULT NULL,
+  `created_by` INT(11) DEFAULT NULL,
+  `updated_by` INT(11) DEFAULT NULL,
+  `last_visit_date` DATE DEFAULT NULL,
   `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_patients_patient_id` (`patient_id`),
   UNIQUE KEY `idx_patients_abha_number` (`abha_number`),
   UNIQUE KEY `idx_patients_abha_address` (`abha_address`),
   KEY `idx_patients_phone` (`phone`),
-  KEY `idx_patients_city` (`city`)
+  KEY `idx_patients_city` (`city`),
+  KEY `idx_patients_clinic_id` (`clinic_id`),
+  KEY `idx_patients_deleted_at` (`deleted_at`),
+  CONSTRAINT `fk_patients_clinic` FOREIGN KEY (`clinic_id`) REFERENCES `clinics`(`id`) ON DELETE SET NULL ON UPDATE CASCADE,
+  CONSTRAINT `fk_patients_created_by` FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =====================================================
@@ -180,6 +241,7 @@ CREATE TABLE IF NOT EXISTS `appointments` (
   `appointment_slot_id` INT(11) DEFAULT NULL COMMENT 'Reference to appointment_slots table',
   `slot_time` TIME DEFAULT NULL COMMENT 'Booked time slot',
   `arrival_type` ENUM('online', 'walk-in', 'referral', 'emergency') DEFAULT 'online' COMMENT 'How patient arrived',
+  `consultation_type` ENUM('new','followup','tele','video') DEFAULT 'new',
   `checked_in_at` TIMESTAMP NULL DEFAULT NULL COMMENT 'When patient checked in',
   `visit_started_at` TIMESTAMP NULL DEFAULT NULL COMMENT 'When doctor started consultation',
   `visit_ended_at` TIMESTAMP NULL DEFAULT NULL COMMENT 'When consultation ended',
@@ -187,6 +249,7 @@ CREATE TABLE IF NOT EXISTS `appointments` (
   `waiting_time_minutes` INT(11) DEFAULT NULL COMMENT 'Patient waiting time',
   `appointment_time` TIME NOT NULL,
   `status` ENUM('scheduled','completed','cancelled','no-show') DEFAULT 'scheduled',
+  `payment_status` ENUM('pending','partial','paid','refunded') DEFAULT 'pending',
   `reason_for_visit` TEXT DEFAULT NULL,
   `notes` TEXT DEFAULT NULL,
   `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -199,7 +262,8 @@ CREATE TABLE IF NOT EXISTS `appointments` (
   KEY `idx_appointments_slot` (`appointment_slot_id`),
   KEY `idx_appointments_slot_time` (`slot_time`),
   KEY `idx_appointments_arrival_type` (`arrival_type`),
-  KEY `idx_appointments_visit_started` (`visit_started_at`)
+  KEY `idx_appointments_visit_started` (`visit_started_at`),
+  KEY `idx_appointments_consultation_type` (`consultation_type`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =====================================================
@@ -233,6 +297,21 @@ CREATE TABLE IF NOT EXISTS `appointment_followups` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =====================================================
+-- TABLE: appointment_reminders
+-- =====================================================
+CREATE TABLE IF NOT EXISTS `appointment_reminders` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `appointment_id` INT NOT NULL,
+  `reminder_type` ENUM('SMS','Email','WhatsApp','IVR') DEFAULT 'SMS',
+  `scheduled_at` DATETIME NOT NULL,
+  `sent_at` DATETIME DEFAULT NULL,
+  `status` ENUM('Pending','Sent','Failed','Cancelled') DEFAULT 'Pending',
+  `error_message` TEXT,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (`appointment_id`) REFERENCES `appointments`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =====================================================
 -- TABLE: medical_records
 -- =====================================================
 CREATE TABLE IF NOT EXISTS `medical_records` (
@@ -253,6 +332,40 @@ CREATE TABLE IF NOT EXISTS `medical_records` (
   PRIMARY KEY (`id`),
   KEY `idx_medical_patient` (`patient_id`),
   KEY `idx_medical_appointment` (`appointment_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =====================================================
+-- TABLE: patient_allergies
+-- =====================================================
+CREATE TABLE IF NOT EXISTS `patient_allergies` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `patient_id` INT NOT NULL,
+  `allergen` VARCHAR(255) NOT NULL,
+  `severity` ENUM('Mild','Moderate','Severe','Life-threatening') DEFAULT 'Moderate',
+  `reaction` TEXT,
+  `discovered_date` DATE DEFAULT NULL,
+  `notes` TEXT,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY `uk_patient_allergen` (`patient_id`,`allergen`),
+  FOREIGN KEY (`patient_id`) REFERENCES `patients`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =====================================================
+-- TABLE: patient_chronic_conditions
+-- =====================================================
+CREATE TABLE IF NOT EXISTS `patient_chronic_conditions` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `patient_id` INT NOT NULL,
+  `condition_name` VARCHAR(255) NOT NULL,
+  `icd_code` VARCHAR(20) DEFAULT NULL,
+  `start_date` DATE DEFAULT NULL,
+  `status` ENUM('Active','Inactive','Resolved') DEFAULT 'Active',
+  `notes` TEXT,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (`patient_id`) REFERENCES `patients`(`id`) ON DELETE CASCADE,
+  INDEX `idx_chronic_patient` (`patient_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =====================================================
@@ -351,6 +464,9 @@ CREATE TABLE IF NOT EXISTS `prescriptions` (
   `frequency` VARCHAR(100) DEFAULT NULL,
   `duration` VARCHAR(100) DEFAULT NULL,
   `instructions` TEXT DEFAULT NULL,
+  `diagnosis` TEXT DEFAULT NULL,
+  `follow_up_date` DATE DEFAULT NULL,
+  `investigations_advised` TEXT DEFAULT NULL,
   `prescribed_date` DATE DEFAULT CURRENT_DATE,
   `expiry_date` DATE DEFAULT NULL,
   `status` ENUM('active','completed','cancelled') DEFAULT 'active',
@@ -377,6 +493,21 @@ CREATE TABLE IF NOT EXISTS `prescription_items` (
   PRIMARY KEY (`id`),
   KEY `idx_pi_prescription` (`prescription_id`),
   KEY `idx_pi_medicine` (`medicine_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =====================================================
+-- TABLE: prescription_diagnoses
+-- =====================================================
+CREATE TABLE IF NOT EXISTS `prescription_diagnoses` (
+  `id` INT(11) NOT NULL AUTO_INCREMENT,
+  `prescription_id` INT(11) NOT NULL,
+  `icd_code` VARCHAR(20) DEFAULT NULL,
+  `icd_title` VARCHAR(500) DEFAULT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_pd_prescription` (`prescription_id`),
+  KEY `idx_pd_icd_code` (`icd_code`),
+  CONSTRAINT `fk_pd_prescription` FOREIGN KEY (`prescription_id`) REFERENCES `prescriptions`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =====================================================
@@ -506,6 +637,148 @@ CREATE TABLE IF NOT EXISTS `patient_tags` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_patient_tag` (`patient_id`,`tag_name`),
   KEY `idx_patient_tags_patient` (`patient_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =====================================================
+-- TABLE: subscription_packages
+-- =====================================================
+CREATE TABLE IF NOT EXISTS `subscription_packages` (
+  `id` INT(11) NOT NULL AUTO_INCREMENT,
+  `clinic_id` INT(11) DEFAULT NULL,
+  `doctor_id` INT(11) DEFAULT NULL,
+  `package_type` ENUM('treatment_plan','wellness','preventive','emergency','chronic_care') DEFAULT 'treatment_plan',
+  `package_name` VARCHAR(255) NOT NULL,
+  `description` TEXT DEFAULT NULL,
+  `num_sessions` INT DEFAULT 1,
+  `pricing_model` ENUM('advance','per_session','monthly','quarterly','annual') DEFAULT 'advance',
+  `price_per_session` DECIMAL(10,2) DEFAULT 0.00,
+  `total_price` DECIMAL(10,2) DEFAULT 0.00,
+  `validity_days` INT DEFAULT 365,
+  `allow_family_members` TINYINT(1) DEFAULT 0,
+  `staff_edit_access` TINYINT(1) DEFAULT 1,
+  `is_active` TINYINT(1) DEFAULT 1,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_sp_clinic` (`clinic_id`),
+  KEY `idx_sp_doctor` (`doctor_id`),
+  KEY `idx_sp_active` (`is_active`),
+  CONSTRAINT `fk_sp_clinic` FOREIGN KEY (`clinic_id`) REFERENCES `clinics`(`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_sp_doctor` FOREIGN KEY (`doctor_id`) REFERENCES `doctors`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =====================================================
+-- TABLE: patient_subscriptions
+-- =====================================================
+CREATE TABLE IF NOT EXISTS `patient_subscriptions` (
+  `id` INT(11) NOT NULL AUTO_INCREMENT,
+  `patient_id` INT(11) NOT NULL,
+  `package_id` INT(11) NOT NULL,
+  `subscription_code` VARCHAR(50) DEFAULT NULL,
+  `start_date` DATE NOT NULL,
+  `end_date` DATE NOT NULL,
+  `sessions_total` INT DEFAULT 0,
+  `sessions_used` INT DEFAULT 0,
+  `sessions_completed` INT DEFAULT 0,
+  `last_session_date` DATE DEFAULT NULL,
+  `status` ENUM('active','expired','cancelled','completed') DEFAULT 'active',
+  `payment_status` ENUM('pending','partial','paid','refunded') DEFAULT 'pending',
+  `amount_paid` DECIMAL(10,2) DEFAULT 0.00,
+  `amount_due` DECIMAL(10,2) DEFAULT 0.00,
+  `notes` TEXT DEFAULT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_subscription_code` (`subscription_code`),
+  KEY `idx_ps_patient` (`patient_id`),
+  KEY `idx_ps_package` (`package_id`),
+  KEY `idx_ps_status` (`status`),
+  KEY `idx_ps_end_date` (`end_date`),
+  CONSTRAINT `fk_ps_patient` FOREIGN KEY (`patient_id`) REFERENCES `patients`(`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_ps_package` FOREIGN KEY (`package_id`) REFERENCES `subscription_packages`(`id`) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =====================================================
+-- TABLE: package_sessions
+-- =====================================================
+CREATE TABLE IF NOT EXISTS `package_sessions` (
+  `id` INT(11) NOT NULL AUTO_INCREMENT,
+  `package_id` INT(11) NOT NULL,
+  `session_number` INT DEFAULT 1,
+  `session_title` VARCHAR(255) DEFAULT NULL,
+  `session_description` TEXT DEFAULT NULL,
+  `duration_minutes` INT DEFAULT 30,
+  `session_type` ENUM('consultation','procedure','therapy','followup') DEFAULT 'consultation',
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_pss_package` (`package_id`),
+  CONSTRAINT `fk_pss_package` FOREIGN KEY (`package_id`) REFERENCES `subscription_packages`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =====================================================
+-- TABLE: abha_consent_requests
+-- =====================================================
+CREATE TABLE IF NOT EXISTS `abha_consent_requests` (
+  `id` INT(11) NOT NULL AUTO_INCREMENT,
+  `patient_id` INT(11) DEFAULT NULL,
+  `abha_address` VARCHAR(255) DEFAULT NULL,
+  `consent_id` VARCHAR(100) DEFAULT NULL,
+  `purpose` VARCHAR(255) DEFAULT NULL,
+  `hi_types` JSON DEFAULT NULL,
+  `date_range_from` DATE DEFAULT NULL,
+  `date_range_to` DATE DEFAULT NULL,
+  `status` ENUM('requested','granted','denied','revoked','expired') DEFAULT 'requested',
+  `granted_at` TIMESTAMP NULL DEFAULT NULL,
+  `expires_at` TIMESTAMP NULL DEFAULT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_acr_patient` (`patient_id`),
+  KEY `idx_acr_status` (`status`),
+  KEY `idx_acr_consent_id` (`consent_id`),
+  CONSTRAINT `fk_acr_patient` FOREIGN KEY (`patient_id`) REFERENCES `patients`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =====================================================
+-- TABLE: abha_meta
+-- =====================================================
+CREATE TABLE IF NOT EXISTS `abha_meta` (
+  `id` INT(11) NOT NULL AUTO_INCREMENT,
+  `meta_key` VARCHAR(100) NOT NULL,
+  `meta_value` TEXT DEFAULT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_abha_meta_key` (`meta_key`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =====================================================
+-- TABLE: genie_analyses
+-- =====================================================
+CREATE TABLE IF NOT EXISTS `genie_analyses` (
+  `id` INT(11) NOT NULL AUTO_INCREMENT,
+  `patient_id` INT(11) DEFAULT NULL,
+  `symptoms` JSON DEFAULT NULL,
+  `analysis_result` JSON DEFAULT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_ga_patient` (`patient_id`),
+  KEY `idx_ga_created` (`created_at`),
+  CONSTRAINT `fk_ga_patient` FOREIGN KEY (`patient_id`) REFERENCES `patients`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =====================================================
+-- TABLE: genie_suggestions
+-- =====================================================
+CREATE TABLE IF NOT EXISTS `genie_suggestions` (
+  `id` INT(11) NOT NULL AUTO_INCREMENT,
+  `analysis_result` JSON DEFAULT NULL,
+  `diagnosis_text` TEXT DEFAULT NULL,
+  `medicines_suggested` JSON DEFAULT NULL,
+  `confidence_score` DECIMAL(3,2) DEFAULT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_gs_created` (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =====================================================
@@ -706,6 +979,20 @@ CREATE TABLE IF NOT EXISTS `icd10_codes` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =====================================================
+-- TABLE: icd_codes
+-- Purpose: ICD code storage (ICD-10 and ICD-11)
+-- =====================================================
+CREATE TABLE IF NOT EXISTS `icd_codes` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `version` VARCHAR(10) NOT NULL COMMENT 'icd10 or icd11',
+  `code` VARCHAR(64) NOT NULL,
+  `title` TEXT,
+  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY `uniq_version_code` (`version`, `code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+COMMENT='ICD-10 and ICD-11 code storage';
+
+-- =====================================================
 -- TABLE: audit_logs (basic audit)
 -- =====================================================
 CREATE TABLE IF NOT EXISTS `audit_logs` (
@@ -821,7 +1108,7 @@ CREATE TABLE IF NOT EXISTS `abha_accounts` (
   `first_name` VARCHAR(100) DEFAULT NULL,
   `middle_name` VARCHAR(100) DEFAULT NULL,
   `last_name` VARCHAR(100) DEFAULT NULL,
-  `gender` ENUM('male', 'female', 'other') DEFAULT NULL,
+  `gender` ENUM('M', 'F', 'Other') NULL,
   `date_of_birth` DATE DEFAULT NULL,
   `mobile` VARCHAR(15) DEFAULT NULL,
   `email` VARCHAR(255) DEFAULT NULL,
@@ -1219,7 +1506,7 @@ ALTER TABLE `abha_api_logs`
 
 -- Doctor schedules table - Note: Changed to reference user_id directly
 ALTER TABLE `doctor_schedules`
-  ADD CONSTRAINT `fk_doctor_schedules_doctor` FOREIGN KEY (`doctor_id`) REFERENCES `users`(`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  ADD CONSTRAINT `fk_doctor_schedules_doctor` FOREIGN KEY (`doctor_id`) REFERENCES `doctors`(`id`) ON DELETE CASCADE ON UPDATE CASCADE,
   ADD CONSTRAINT `fk_doctor_schedules_clinic` FOREIGN KEY (`clinic_id`) REFERENCES `clinics`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- Appointment slots table
@@ -1229,7 +1516,7 @@ ALTER TABLE `appointment_slots`
 
 -- Blocked slots table - Note: Changed to reference user_id directly
 ALTER TABLE `blocked_slots`
-  ADD CONSTRAINT `fk_blocked_slots_doctor` FOREIGN KEY (`doctor_id`) REFERENCES `users`(`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  ADD CONSTRAINT `fk_blocked_slots_doctor` FOREIGN KEY (`doctor_id`) REFERENCES `doctors`(`id`) ON DELETE CASCADE ON UPDATE CASCADE,
   ADD CONSTRAINT `fk_blocked_slots_clinic` FOREIGN KEY (`clinic_id`) REFERENCES `clinics`(`id`) ON DELETE SET NULL ON UPDATE CASCADE,
   ADD CONSTRAINT `fk_blocked_slots_created_by` FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
 
@@ -1282,11 +1569,11 @@ CREATE INDEX IF NOT EXISTS idx_prescriptions_patient_id ON prescriptions(patient
 CREATE INDEX IF NOT EXISTS idx_lab_investigations_patient_id ON lab_investigations(patient_id);
 CREATE INDEX IF NOT EXISTS idx_lab_investigations_status ON lab_investigations(status);
 
-ALTER TABLE medical_certificate_templates
-ADD COLUMN header_image LONGTEXT NULL AFTER template_content;
+ALTER TABLE `medical_certificate_templates`
+ADD COLUMN `header_image` LONGTEXT NULL AFTER `template_content`;
 
-ALTER TABLE medical_certificate_templates
-ADD COLUMN footer_image LONGTEXT NULL AFTER header_image;
+ALTER TABLE `medical_certificate_templates`
+ADD COLUMN `footer_image` LONGTEXT NULL AFTER `header_image`;
 
 
 -- =====================================================
@@ -1983,6 +2270,8 @@ CREATE TABLE IF NOT EXISTS `rooms` (
   `bed_count` INT(11) DEFAULT 1,
   `clinic_id` INT(11) DEFAULT NULL,
   `status` ENUM('available','occupied','maintenance','reserved') DEFAULT 'available',
+  `current_admission_id` INT(11) DEFAULT NULL,
+  `last_cleaned_at` DATETIME DEFAULT NULL,
   `is_active` TINYINT(1) DEFAULT 1,
   `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -1991,7 +2280,8 @@ CREATE TABLE IF NOT EXISTS `rooms` (
   KEY `idx_rooms_type` (`room_type_id`),
   KEY `idx_rooms_status` (`status`),
   KEY `idx_rooms_clinic` (`clinic_id`),
-  FOREIGN KEY (`room_type_id`) REFERENCES `room_types`(`id`) ON DELETE RESTRICT
+  FOREIGN KEY (`room_type_id`) REFERENCES `room_types`(`id`) ON DELETE RESTRICT,
+  CONSTRAINT `fk_room_current_admission` FOREIGN KEY (`current_admission_id`) REFERENCES `patient_admissions`(`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =====================================================
@@ -2004,6 +2294,8 @@ CREATE TABLE IF NOT EXISTS `patient_admissions` (
   `patient_id` INT(11) NOT NULL,
   `admission_type` ENUM('IPD','OPD') NOT NULL DEFAULT 'OPD',
   `doctor_id` INT(11) NOT NULL,
+  `admitting_doctor_id` INT(11) DEFAULT NULL,
+  `admission_source` ENUM('OPD','ER','Referral','Direct','Other') DEFAULT 'OPD',
   `clinic_id` INT(11) DEFAULT NULL,
   `appointment_id` INT(11) DEFAULT NULL COMMENT 'Link to original appointment if any',
 
@@ -2027,6 +2319,7 @@ CREATE TABLE IF NOT EXISTS `patient_admissions` (
 
   -- Status Management
   `status` ENUM('admitted','discharged','transferred','cancelled') DEFAULT 'admitted',
+  `discharge_type` ENUM('Improved','Stable','Against Medical Advice','Death','Referral','Other') DEFAULT NULL,
   `is_emergency` TINYINT(1) DEFAULT 0,
 
   -- Billing Control
@@ -2050,9 +2343,11 @@ CREATE TABLE IF NOT EXISTS `patient_admissions` (
   KEY `idx_admissions_room` (`room_id`),
   KEY `idx_admissions_clinic` (`clinic_id`),
   KEY `idx_admissions_bill_locked` (`bill_locked`),
+  KEY `idx_admissions_admitting_doctor` (`admitting_doctor_id`),
   FOREIGN KEY (`patient_id`) REFERENCES `patients`(`id`) ON DELETE RESTRICT,
   FOREIGN KEY (`doctor_id`) REFERENCES `doctors`(`id`) ON DELETE RESTRICT,
-  FOREIGN KEY (`room_id`) REFERENCES `rooms`(`id`) ON DELETE SET NULL
+  FOREIGN KEY (`room_id`) REFERENCES `rooms`(`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_admitting_doctor` FOREIGN KEY (`admitting_doctor_id`) REFERENCES `doctors`(`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =====================================================
@@ -2956,74 +3251,6 @@ SELECT 'Performance indexes created successfully!' as Status;
 -- SAMPLE QUERIES FOR TESTING
 -- =====================================================
 
-/*
-
--- 1. Create a new IPD admission
-INSERT INTO patient_admissions (
-  admission_number, patient_id, admission_type, doctor_id, clinic_id,
-  admission_date, admission_time, room_id, bed_number,
-  chief_complaint, provisional_diagnosis, admitted_by
-) VALUES (
-  'IPD-2026-00001', 1, 'IPD', 1, 1,
-  '2026-01-06 10:30:00', '10:30:00', 1, 'Bed-A',
-  'Fever and abdominal pain', 'Suspected appendicitis', 1
-);
-
--- 2. Add daily services
-INSERT INTO ipd_daily_services (
-  admission_id, service_date, service_name, service_category,
-  quantity, unit_price, total_price, doctor_id, created_by
-) VALUES
-  (1, '2026-01-06', 'Consultation', 'Consultation', 1, 500.00, 500.00, 1, 1),
-  (1, '2026-01-06', 'Blood Test - Complete', 'Investigation', 1, 300.00, 300.00, 1, 1),
-  (1, '2026-01-07', 'X-Ray Abdomen', 'Investigation', 1, 800.00, 800.00, 1, 1);
-
--- 3. Add medicines
-INSERT INTO ipd_medicines_consumables (
-  admission_id, entry_date, entry_time, item_type, item_name,
-  dosage, quantity, unit, unit_price, total_price, administered_by, created_by
-) VALUES
-  (1, '2026-01-06', '14:00:00', 'medicine', 'Paracetamol 500mg', '1 tablet', 3, 'tablet', 5.00, 15.00, 2, 2),
-  (1, '2026-01-06', '20:00:00', 'medicine', 'Ciprofloxacin 500mg', '1 tablet', 1, 'tablet', 15.00, 15.00, 2, 2);
-
--- 4. Add advance payment
-INSERT INTO admission_payments (
-  admission_id, payment_date, payment_type, amount, payment_method, received_by
-) VALUES
-  (1, '2026-01-06 11:00:00', 'advance', 5000.00, 'Cash', 1);
-
--- 5. Generate room charges
-CALL generate_room_charges(1);
-
--- 6. Calculate bill
-CALL calculate_admission_bill(1);
-
--- 7. View current bill
-SELECT * FROM admission_bills WHERE admission_id = 1;
-
--- 8. Discharge patient
-UPDATE patient_admissions
-SET
-  status = 'discharged',
-  discharge_date = '2026-01-08 09:00:00',
-  discharge_time = '09:00:00',
-  final_diagnosis = 'Acute Appendicitis - Operated',
-  discharged_by = 1
-WHERE id = 1;
-
--- 9. Lock bill after discharge
-CALL lock_admission_bill(1, 1);
-
--- 10. View IPD census
-SELECT * FROM v_current_ipd_census;
-
--- 11. View bill summary
-SELECT * FROM v_admission_bill_summary WHERE admission_id = 1;
-
--- 12. View daily revenue
-SELECT * FROM v_daily_revenue_summary;
-
-*/
 
 -- =====================================================
 -- COMMIT TRANSACTION
@@ -3055,3 +3282,4 @@ SELECT CONCAT(
 
 
 COMMIT;
+
